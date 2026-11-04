@@ -1,0 +1,20 @@
+abstract final class Routes {
+  static const splash = '/';
+  static const phone = '/activation/phone';
+  static const smsCode = '/activation/code';
+  static const pinCreate = '/activation/pin';
+  static const download = '/activation/download';
+  static const unlock = '/unlock';
+  static const blocked = '/blocked';
+  static const revoked = '/revoked';
+  static const shell = '/home';
+  static const producer = '/producer';
+  static const newProducer = '/producer/new';
+  static const producerSpace = '/producer/space';
+  static const survey = '/survey';
+  static const surveyDone = '/survey/done';
+  static const crops = '/crops';
+  static const sync = '/sync';
+  static const fix = '/sync/fix';
+  static const success = '/success';
+}
