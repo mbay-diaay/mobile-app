@@ -71,14 +71,4 @@ lib/
   app/modules/<domaine>/       un fichier par écran : contrôleur GetX + vue
 ```
 
-## Animations
 
-- **Entre les écrans** : chaque famille a sa transition GetX. L'activation glisse sur le côté (cupertino), les alertes zooment, les formulaires montent par le bas, l'accueil et le PIN apparaissent en fondu.
-- **Entre les onglets** : un glissé suit le sens de navigation, et la pastille citron de la barre flottante glisse avec un léger rebond.
-- **À l'entrée d'un écran** : les éléments arrivent en cascade, en glissé, en fondu et avec rebond. Les cartes crème montent du bas, les en-têtes sombres descendent.
-- **Micro-interactions** :
-  - les éléments touchés se compriment ;
-  - le PIN ou le code tremble s'il est faux, et les cases se remplissent avec un effet élastique ;
-  - le compte à rebours et l'anneau de téléchargement s'animent, les chiffres de l'accueil défilent jusqu'à leur valeur ;
-  - les contours de parcelle se dessinent, et chaque nouvel angle du relevé GPS étire le trait ;
-  - les icônes de synchronisation tournent, l'écran de réussite fait jaillir des éclats.
