@@ -14,6 +14,7 @@ import '../sync/success.dart' show SuccessGroup, SuccessRow;
 import '../../widgets/animations.dart';
 import '../../widgets/buttons.dart';
 import '../../widgets/layout.dart';
+import '../../widgets/retry.dart';
 
 const _seasons = ['Campagne horticole 2026', 'Contre-saison 2026'];
 const _seasonShort = ['Horticole 2026', 'Contre-saison 2026'];
@@ -146,7 +147,7 @@ class CropsController extends GetxController {
 
   // ───────── Enregistrer
 
-  void save() {
+  Future<void> save() async {
     if (plans[0].isEmpty && plans[1].isEmpty) {
       shake.value++;
       showToast('Ajoutez au moins une culture.',
@@ -167,6 +168,10 @@ class CropsController extends GetxController {
     }
     session.declareCrops(owner, code,
         {for (var s = 0; s < plans.length; s++) s: plans[s].toList()});
+    // Envoi au serveur : en cas d'erreur, la raison s'affiche avec « Réessayer ».
+    final ok = await runWithRetry(() => session.sendCrops(owner, code),
+        title: 'Cultures non enregistrées');
+    if (!ok) return;
     final groups = [
       for (var s = 0; s < plans.length; s++)
         if (plans[s].any((c) => c.share > 0))

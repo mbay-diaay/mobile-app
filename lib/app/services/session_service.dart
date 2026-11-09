@@ -3,6 +3,7 @@ import 'package:get/get.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../core/app_colors.dart';
 import '../data/crop_catalog.dart';
 import '../data/mock_data.dart';
 import 'auth_service.dart';
@@ -99,6 +100,11 @@ class SessionService extends GetxService {
     activated.value = false;
     failedAttempts.value = 0;
     pin.value = defaultPin;
+    // Rien de l'utilisateur précédent ne doit rester affiché.
+    producers.clear();
+    recent.clear();
+    plots.clear();
+    cropPlans.clear();
     _prefs
       ..remove(_kActivated)
       ..remove(_kEmail)
@@ -113,17 +119,7 @@ class SessionService extends GetxService {
 
   /// Cultures déclarées par parcelle (clé : code parcelle) et par saison
   /// (0 = campagne horticole, 1 = contre-saison). Gardées en mémoire, hors ligne.
-  final cropPlans = <String, Map<int, List<Crop>>>{
-    'PA-0006': {
-      0: [
-        CropCatalog.byName('Carotte')!.toCrop(60),
-        CropCatalog.byName('Aubergine')!.toCrop(40)
-      ],
-    },
-    'PA-0012': {
-      0: [CropCatalog.byName('Oignon')!.toCrop(100, 'Violet de Galmi')],
-    },
-  }.obs;
+  final cropPlans = <String, Map<int, List<Crop>>>{}.obs;
   final toFix = <SyncIssue>[...MockData.syncIssues].obs;
   final pending = <PendingItem>[...MockData.pending].obs;
   final todoCount = 8.obs;
@@ -196,6 +192,7 @@ class SessionService extends GetxService {
     String? phone,
     bool cniPhotos = false,
     String? code,
+    String? remoteId,
     bool synced = false,
   }) {
     final p = Producer(
@@ -210,14 +207,18 @@ class SessionService extends GetxService {
       org: org,
       isNew: !synced,
       createdAt: DateTime.now(),
+      remoteId: remoteId,
     );
     producers.insert(0, p);
     visit(p);
     createdToday.value++;
-    pending.add(
-        PendingItem(Symbols.person_add_rounded, 'Nouvelle fiche · ${p.name}'));
-    _pushCreate(p, first, last);
-    if (cniPhotos)
+    // Déjà créée sur le serveur par l'écran : rien à renvoyer (évite un doublon).
+    if (!synced) {
+      pending.add(PendingItem(
+          Symbols.person_add_rounded, 'Nouvelle fiche · ${p.name}'));
+      _pushCreate(p, first, last);
+    }
+    if (cniPhotos && !synced)
       pending.add(
           PendingItem(Symbols.badge_rounded, 'CNI recto + verso · ${p.name}'));
     return p;
@@ -338,7 +339,7 @@ class SessionService extends GetxService {
   }
 
   List<Plot> plotsOf(Producer p) {
-    final base = plots[p.code] ?? (p.isNew ? const <Plot>[] : MockData.plots);
+    final base = plots[p.code] ?? const <Plot>[];
     return [for (final pl in base) _withCrops(pl)];
   }
 
@@ -354,7 +355,11 @@ class SessionService extends GetxService {
     if (names.isEmpty) return pl;
     return Plot(pl.code, pl.area, names.join(', '), pl.status, pl.statusBg,
         pl.statusInk,
-        remoteId: pl.remoteId, areaHa: pl.areaHa, lat: pl.lat, lng: pl.lng);
+        remoteId: pl.remoteId,
+        areaHa: pl.areaHa,
+        lat: pl.lat,
+        lng: pl.lng,
+        label: pl.label);
   }
 
   /// Copie de travail des cultures d'une parcelle pour une saison.
@@ -364,12 +369,93 @@ class SessionService extends GetxService {
 
   String nextPlotCode() => 'PA-${(_nextPlot++).toString().padLeft(4, '0')}';
 
+  /// Lit les parcelles et cultures de la fiche sur le serveur (`GET /producers/:id`) et
+  /// remplace ce qui est affiché. Lève une [ApiException] en cas d'échec.
+  Future<void> loadPlots(Producer p) async {
+    final id = p.remoteId;
+    if (id == null) return; // fiche pas encore créée sur le serveur
+    final data = await Get.find<ApiClient>().get('/producers/$id')
+        as Map<String, dynamic>;
+    final apiCrops = [
+      for (final c in (data['crops'] as List? ?? const []))
+        c as Map<String, dynamic>
+    ];
+    final list = <Plot>[];
+    for (final j in (data['plots'] as List? ?? const [])) {
+      final m = j as Map<String, dynamic>;
+      final plotId = m['id'].toString();
+      final ha = (m['areaHa'] as num?)?.toDouble() ?? 0;
+      // Cultures de la parcelle, par saison (parts égales : le serveur n'a pas de %).
+      final bySeason = <int, List<Map<String, dynamic>>>{};
+      for (final c
+          in apiCrops.where((c) => c['plotId']?.toString() == plotId)) {
+        final season =
+            (c['season'] ?? '').toString().startsWith('Contre') ? 1 : 0;
+        (bySeason[season] ??= []).add(c);
+      }
+      final plan = <int, List<Crop>>{};
+      bySeason.forEach((season, items) {
+        final each = (100 / items.length).floor();
+        plan[season] = [
+          for (var i = 0; i < items.length; i++)
+            _cropFromApi(
+                items[i], i == 0 ? 100 - each * (items.length - 1) : each, i)
+        ];
+      });
+      if (plan.isEmpty) {
+        cropPlans.remove(plotId);
+      } else {
+        cropPlans[plotId] = plan;
+      }
+      final raw = (m['name'] ?? '').toString();
+      list.add(_withCrops(Plot(
+          plotId,
+          '${ha.toStringAsFixed(2).replaceAll('.', ',')} ha',
+          'Cultures à déclarer',
+          'Enregistrée',
+          AppColors.lime,
+          AppColors.forest,
+          remoteId: plotId,
+          areaHa: ha,
+          lat: (m['lat'] as num?)?.toDouble(),
+          lng: (m['lng'] as num?)?.toDouble(),
+          label: raw.isEmpty ? plotId : raw)));
+    }
+    plots[p.code] = list;
+  }
+
+  Crop _cropFromApi(Map<String, dynamic> c, int share, int index) {
+    final name = (c['name'] ?? '').toString();
+    final spec = CropCatalog.byName(name) ?? CropCatalog.custom(name, index);
+    return spec.toCrop(share, (c['variety'] ?? '').toString())
+      ..remoteId = c['id']?.toString();
+  }
+
+  /// Envoie la parcelle au serveur (nom, surface en hectares, point central) et renvoie son
+  /// identifiant. Lève une [ApiException] si le serveur refuse : l'écran l'affiche et
+  /// propose de réessayer. Le contour complet reste sur le téléphone.
+  Future<String?> sendPlot(Producer owner, Plot plot) async {
+    final pid = owner.remoteId;
+    if (pid == null) return null; // fiche de démonstration : rien à envoyer
+    final data =
+        await Get.find<ApiClient>().post('/producers/$pid/plots', body: {
+      'name': 'Parcelle ${plot.code}',
+      'areaHa': double.parse(plot.areaHa.toStringAsFixed(4)),
+      if (owner.village.isNotEmpty) 'village': owner.village,
+      if (plot.lat != null) 'lat': plot.lat,
+      if (plot.lng != null) 'lng': plot.lng,
+    }) as Map<String, dynamic>;
+    return data['id']?.toString();
+  }
+
+  /// Ajoute la parcelle à la fiche, une fois enregistrée (ou sans envoi pour une fiche de démonstration).
   void addPlot(Producer owner, Plot plot, double area) {
     plots[owner.code] = [plot, ...plotsOf(owner)];
     surveyedToday.value++;
-    pending.add(PendingItem(
-        Symbols.pentagon_rounded, 'Parcelle relevée · ${plot.code}'));
-    _pushPlot(owner, plot);
+    if (plot.remoteId == null) {
+      pending.add(PendingItem(
+          Symbols.pentagon_rounded, 'Parcelle relevée · ${plot.code}'));
+    }
   }
 
   /// Envoie la parcelle : un nom, la surface en hectares et le point central.
@@ -412,11 +498,15 @@ class SessionService extends GetxService {
         if (e.value.isNotEmpty) e.key: [for (final c in e.value) c.copy()],
     };
     cropsToday.value++;
-    final label = 'Cultures · $plotCode';
-    if (!pending.any((x) => x.label == label))
-      pending.add(PendingItem(Symbols.potted_plant_rounded, label));
-    _pushCrops(owner, plotCode, removed: before);
+    _removedCrops = before;
   }
+
+  List<Crop> _removedCrops = const [];
+
+  /// Envoie les cultures de la parcelle enregistrées par [declareCrops]. Lève une
+  /// [ApiException] en cas d'échec ; on peut rappeler (les cultures déjà créées sont conservées).
+  Future<void> sendCrops(Producer owner, String plotCode) =>
+      _pushCrops(owner, plotCode, removed: _removedCrops);
 
   static const _seasonLabels = ['Horticole 2026', 'Contre-saison 2026'];
 
@@ -428,38 +518,34 @@ class SessionService extends GetxService {
     final plot = plots[owner.code]?.firstWhereOrNull((x) => x.code == plotCode);
     final plotId = plot?.remoteId;
     if (pid == null || plotId == null)
-      return; // en attente de l'envoi de la fiche / parcelle
+      return; // fiche ou parcelle de démonstration
     final api = Get.find<ApiClient>();
     final keep = {
       for (final l in cropPlans[plotCode]?.values ?? const <List<Crop>>[])
         for (final c in l) c.remoteId
     };
-    try {
-      for (final c in removed) {
-        if (c.remoteId != null && !keep.contains(c.remoteId)) {
-          await api.request('DELETE', '/producers/$pid/crops/${c.remoteId}');
+    for (final c in removed) {
+      if (c.remoteId != null && !keep.contains(c.remoteId)) {
+        await api.request('DELETE', '/producers/$pid/crops/${c.remoteId}');
+      }
+    }
+    _removedCrops = const [];
+    final plan = cropPlans[plotCode] ?? const <int, List<Crop>>{};
+    for (final e in plan.entries) {
+      for (final c in e.value) {
+        final body = {
+          'name': c.name,
+          if (c.variety.isNotEmpty) 'variety': c.variety,
+          'season': _seasonLabels[e.key],
+        };
+        if (c.remoteId == null) {
+          final data = await api.post('/producers/$pid/crops',
+              body: {...body, 'plotId': plotId}) as Map<String, dynamic>;
+          c.remoteId = data['id'].toString();
+        } else {
+          await api.patch('/producers/$pid/crops/${c.remoteId}', body: body);
         }
       }
-      final plan = cropPlans[plotCode] ?? const <int, List<Crop>>{};
-      for (final e in plan.entries) {
-        for (final c in e.value) {
-          final body = {
-            'name': c.name,
-            if (c.variety.isNotEmpty) 'variety': c.variety,
-            'season': _seasonLabels[e.key],
-          };
-          if (c.remoteId == null) {
-            final data = await api.post('/producers/$pid/crops',
-                body: {...body, 'plotId': plotId}) as Map<String, dynamic>;
-            c.remoteId = data['id'].toString();
-          } else {
-            await api.patch('/producers/$pid/crops/${c.remoteId}', body: body);
-          }
-        }
-      }
-      pending.removeWhere((x) => x.label == 'Cultures · $plotCode');
-    } on ApiException catch (e) {
-      lastSyncError.value = e.userMessage;
     }
   }
 

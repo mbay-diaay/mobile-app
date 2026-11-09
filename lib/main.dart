@@ -9,6 +9,7 @@ import 'app/services/api_client.dart';
 import 'app/services/auth_service.dart';
 import 'app/services/network_service.dart';
 import 'app/services/producer_repository.dart';
+import 'app/services/producers_service.dart';
 import 'app/services/session_service.dart';
 
 Future<void> main() async {
@@ -20,7 +21,11 @@ Future<void> main() async {
   await Get.putAsync(() => ApiClient().init(), permanent: true);
   Get.put(AuthService(), permanent: true);
   Get.put(ProducerRepository(), permanent: true);
+  Get.put(ProducersService(), permanent: true);
   final session = Get.find<SessionService>();
+  // Appareil non activé (première installation, ou réinstallation) : on oublie d'éventuels
+  // jetons restés dans le trousseau (iOS les garde après la suppression de l'app).
+  if (!session.activated.value) await Get.find<ApiClient>().clearTokens();
   // Session refusée par l'API (jeton révoqué ou expiré) : retour à la connexion.
   Get.find<ApiClient>().onSessionExpired = () {
     session.revoke();
@@ -38,7 +43,7 @@ class MbayDiaayApp extends StatelessWidget {
         title: 'Mbay Diaay',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.light,
-        locale: const Locale('fr', 'SN'), 
+        locale: const Locale('fr', 'SN'),
         initialRoute: Routes.splash,
         getPages: AppPages.pages,
         defaultTransition: Transition.cupertino,

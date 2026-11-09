@@ -1,10 +1,6 @@
-import 'dart:io';
-
 import 'package:get/get.dart';
-import 'package:http/http.dart' as http;
 
 import 'api_client.dart';
-import 'api_config.dart';
 import 'network_service.dart';
 
 /// Appels API producteurs (le serveur a le dernier mot sur validation / droits).
@@ -39,28 +35,14 @@ class ProducersService extends GetxService {
       if (phone != null && phone.isNotEmpty) 'phone': _normalizePhone(phone),
       if (cni != null && cni.trim().isNotEmpty) 'cni': cni.trim(),
     };
-    try {
-      final data = await _client.post('/producers', body: body);
-      return data is Map<String, dynamic> ? data : null;
-    } catch (_) {
-      return null;
-    }
+    // Les erreurs (ApiException) remontent à l'écran, qui les affiche et propose de réessayer.
+    final data = await _client.post('/producers', body: body);
+    return data is Map<String, dynamic> ? data : null;
   }
 
-  /// Upload photo CNI (une face). Champ multipart « file ».
-  Future<bool> uploadCniPhoto(String producerId, String filePath) async {
-    if (!canReachServer) return false;
-    final file = File(filePath);
-    if (!await file.exists()) return false;
-    final uri = Uri.parse('${ApiConfig.baseUrl}/producers/$producerId/cni/photo');
-    final req = http.MultipartRequest('POST', uri);
-    if (_client.accessToken != null) {
-      req.headers['Authorization'] = 'Bearer ${_client.accessToken}';
-    }
-    req.files.add(await http.MultipartFile.fromPath('file', filePath));
-    final streamed = await req.send();
-    return streamed.statusCode == 200 || streamed.statusCode == 201;
-  }
+  /// Envoie une face de la CNI (multipart, champ « file »). Lève une [ApiException] en cas d'échec.
+  Future<void> uploadCniPhoto(String producerId, String filePath) =>
+      _client.postFile('/producers/$producerId/cni/photo', filePath);
 
   static String _normalizePhone(String raw) {
     final digits = raw.replaceAll(RegExp(r'\D'), '');

@@ -22,6 +22,7 @@ import '../../widgets/animations.dart';
 import '../../widgets/buttons.dart';
 import '../../widgets/layout.dart';
 import '../../widgets/map_canvas.dart';
+import '../../widgets/retry.dart';
 
 /// Repère local de dessin : 3 unités = 1 m (même échelle que [indicativeHectares]).
 /// Les mesures affichées (distances, surface) sont, elles, calculées sur la sphère
@@ -136,9 +137,24 @@ class SurveyController extends GetxController {
         icon: Symbols.no_photography_rounded);
   }
 
-  @override
-  void onReady() {
-    super.onReady();
+  /// Méthode choisie au départ : 0 caméra, 1 plan, null = écran de choix.
+  /// (La saisie manuelle n'est pas un mode : elle ouvre sa fiche puis enregistre.)
+  final mode = Rxn<int>();
+
+  /// Retour à l'écran de choix (par exemple quand le GPS est inutilisable).
+  void backToPicker() {
+    _gps?.cancel();
+    gpsProblem.value = null;
+    clear();
+    mode.value = null;
+  }
+
+  /// Choix du départ. Caméra et plan démarrent le GPS ; la saisie manuelle ouvre sa fiche
+  /// et, si on l'abandonne, on reste sur l'écran de choix.
+  Future<void> choose(int m) async {
+    if (m == 2) return openManual();
+    showPlan.value = m == 1;
+    mode.value = m;
     startGps();
   }
 
@@ -314,6 +330,81 @@ class SurveyController extends GetxController {
   /// Saisie manuelle (secours sans GPS) : longueur × largeur en mètres, pour un
   /// champ rectangulaire. La parcelle est marquée « Surface déclarée ».
   Future<void> openManual() async {
+    final mode = await Get.bottomSheet<String>(
+      const _ModeSheet(),
+      barrierColor: const Color(0x8C0A140F),
+      enterBottomSheetDuration: const Duration(milliseconds: 380),
+    );
+    if (mode == 'points') return _manualPoints();
+    if (mode == 'size') return _manualSize();
+  }
+
+  /// Envoie la parcelle au serveur (raison de l'erreur + « Réessayer » si ça échoue),
+  /// puis l'ajoute à la fiche. Renvoie false si l'utilisateur abandonne.
+  Future<bool> _commitPlot(Plot plot, double ha) async {
+    final session = Get.find<SessionService>();
+    String? id;
+    saving.value = true;
+    try {
+      final ok = await runWithRetry(() async {
+        id = await session.sendPlot(owner, plot);
+      }, title: 'Parcelle non enregistrée');
+      if (!ok) return false;
+    } finally {
+      saving.value = false;
+    }
+    session.addPlot(owner, id == null ? plot : plot.withRemoteId(id!), ha);
+    return true;
+  }
+
+  /// Envoi en cours : bloque un second appui.
+  final saving = false.obs;
+
+  /// Saisie de points : latitude et longitude de chaque angle (« Me localiser » remplit
+  /// avec le GPS). La surface est calculée sur la sphère à partir de ces points.
+  Future<void> _manualPoints() async {
+    final pts = await Get.bottomSheet<List<geo.LatLng>>(
+      const _PointsSheet(),
+      isScrollControlled: true,
+      barrierColor: const Color(0x8C0A140F),
+      enterBottomSheetDuration: const Duration(milliseconds: 420),
+    );
+    if (pts == null || pts.length < 3 || saving.value) return;
+    final lat0 = pts.first.latitude, lng0 = pts.first.longitude;
+    final local = [
+      for (final p in pts)
+        Offset(
+            (p.longitude - lng0) *
+                111320 *
+                math.cos(lat0 * math.pi / 180) *
+                _unitsPerMeter,
+            -(p.latitude - lat0) * 110540 * _unitsPerMeter)
+    ];
+    final ha = geo.SphericalUtil.computeArea(pts) / 10000;
+    final lat = pts.fold(0.0, (a, p) => a + p.latitude) / pts.length;
+    final lng = pts.fold(0.0, (a, p) => a + p.longitude) / pts.length;
+    final plot = Plot(
+        plotCode,
+        '${ha.toStringAsFixed(2).replaceAll('.', ',')} ha',
+        'Cultures à déclarer',
+        'Points saisis',
+        AppColors.blueSoft,
+        AppColors.blueInk,
+        areaHa: ha,
+        lat: lat,
+        lng: lng);
+    if (!await _commitPlot(plot, ha)) return;
+    Get.offNamed(Routes.surveyDone, arguments: {
+      'points': _fitToViewBox(local),
+      'owner': owner,
+      'code': plotCode,
+      'area': ha
+    });
+  }
+
+  /// Saisie de la longueur et de la largeur (champ rectangulaire).
+  Future<void> _manualSize() async {
+    if (saving.value) return;
     final size = await Get.bottomSheet<Size>(
       const _ManualSheet(),
       isScrollControlled: true,
@@ -323,18 +414,15 @@ class SurveyController extends GetxController {
     if (size == null) return;
     final l = size.width, w = size.height;
     final ha = l * w / 10000;
-    Get.find<SessionService>().addPlot(
-      owner,
-      Plot(
-          plotCode,
-          '${ha.toStringAsFixed(2).replaceAll('.', ',')} ha',
-          'Cultures à déclarer',
-          'Surface déclarée',
-          AppColors.amberSoft,
-          AppColors.amberInk,
-          areaHa: ha),
-      ha,
-    );
+    final plot = Plot(
+        plotCode,
+        '${ha.toStringAsFixed(2).replaceAll('.', ',')} ha',
+        'Cultures à déclarer',
+        'Surface déclarée',
+        AppColors.amberSoft,
+        AppColors.amberInk,
+        areaHa: ha);
+    if (!await _commitPlot(plot, ha)) return;
     final rect = [
       Offset.zero,
       Offset(l * _unitsPerMeter, 0),
@@ -349,27 +437,24 @@ class SurveyController extends GetxController {
     });
   }
 
-  void finish() {
-    if (!canFinish) return;
+  Future<void> finish() async {
+    if (!canFinish || saving.value) return;
     if (!closed.value) {
       final hit = _crossing(points.last, points.first, closing: true);
       if (hit != null) return _markCrossed(points.length, hit);
     }
     final ha = area;
-    Get.find<SessionService>().addPlot(
-      owner,
-      Plot(
-          plotCode,
-          '${ha.toStringAsFixed(2).replaceAll('.', ',')} ha',
-          'Cultures à déclarer',
-          'Relevée',
-          AppColors.blueSoft,
-          AppColors.blueInk,
-          areaHa: ha,
-          lat: _center?.latitude,
-          lng: _center?.longitude),
-      ha,
-    );
+    final plot = Plot(
+        plotCode,
+        '${ha.toStringAsFixed(2).replaceAll('.', ',')} ha',
+        'Cultures à déclarer',
+        'Relevée',
+        AppColors.blueSoft,
+        AppColors.blueInk,
+        areaHa: ha,
+        lat: _center?.latitude,
+        lng: _center?.longitude);
+    if (!await _commitPlot(plot, ha)) return;
     Get.offNamed(Routes.surveyDone, arguments: {
       'points': _fitToViewBox(points),
       'owner': owner,
@@ -448,9 +533,11 @@ class SurveyView extends GetView<SurveyController> {
           Positioned.fill(
             child: Obx(() => AnimatedSwitcher(
                   duration: Motion.medium,
-                  child: c.showPlan.value
-                      ? _Viewfinder(key: const ValueKey('plan'), c: c)
-                      : _CameraView(key: const ValueKey('cam'), c: c),
+                  child: c.mode.value == null
+                      ? const SizedBox.shrink(key: ValueKey('none'))
+                      : c.showPlan.value
+                          ? _Viewfinder(key: const ValueKey('plan'), c: c)
+                          : _CameraView(key: const ValueKey('cam'), c: c),
                 )),
           ),
           // Haut : fermer · précision GPS · effacer, puis la consigne.
@@ -544,6 +631,15 @@ class SurveyView extends GetView<SurveyController> {
                       : c.crossed.value
                           ? _CrossedSheet(key: const ValueKey('x'), c: c)
                           : _Controls(key: const ValueKey('ok'), c: c),
+                )),
+          ),
+          // Écran de choix de la méthode, tant que rien n'est choisi.
+          Positioned.fill(
+            child: Obx(() => AnimatedSwitcher(
+                  duration: Motion.medium,
+                  child: c.mode.value == null
+                      ? _ModePicker(key: const ValueKey('pick'), c: c)
+                      : const SizedBox.shrink(key: ValueKey('done')),
                 )),
           ),
         ]),
@@ -956,22 +1052,6 @@ class _Controls extends StatelessWidget {
                 ),
               ),
             ]),
-            const SizedBox(height: 14),
-            // Onglets texte, comme « Mesurer · Niveau » dans Mesures.
-            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              _Tab(
-                  label: 'Caméra',
-                  on: !c.showPlan.value,
-                  enabled: c.cameraOk.value,
-                  onTap: () => c.showPlan.value = false),
-              const SizedBox(width: 28),
-              _Tab(
-                  label: 'Plan',
-                  on: c.showPlan.value,
-                  onTap: () => c.showPlan.value = true),
-              const SizedBox(width: 28),
-              _Tab(label: 'Saisie', on: false, onTap: c.openManual),
-            ]),
           ]);
         }),
       );
@@ -1126,35 +1206,6 @@ class _CrossedSheet extends StatelessWidget {
               onTap: c.clear,
             ),
           ]),
-        ),
-      );
-}
-
-class _Tab extends StatelessWidget {
-  const _Tab(
-      {required this.label,
-      required this.on,
-      required this.onTap,
-      this.enabled = true});
-  final String label;
-  final bool on;
-  final bool enabled;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) => GestureDetector(
-        onTap: enabled ? onTap : null,
-        behavior: HitTestBehavior.opaque,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-          child: AnimatedDefaultTextStyle(
-            duration: Motion.fast,
-            style: jakarta(14,
-                weight: on ? FontWeight.w800 : FontWeight.w600,
-                color:
-                    on ? AppColors.lime : AppColors.white(enabled ? .55 : .25)),
-            child: Text(label.toUpperCase()),
-          ),
         ),
       );
 }
@@ -1418,13 +1469,13 @@ class _GpsProblem extends StatelessWidget {
                 onTap: c.startGps),
             const SizedBox(height: 10),
             FlatButton(
-              label: 'Saisir les dimensions à la main',
-              icon: Symbols.straighten_rounded,
+              label: 'Choisir une autre méthode',
+              icon: Symbols.swap_horiz_rounded,
               bg: AppColors.sage,
               fg: AppColors.forest,
               height: 48,
               radius: 16,
-              onTap: c.openManual,
+              onTap: c.backToPicker,
             ),
           ]),
         ),
@@ -1610,4 +1661,471 @@ class _ManualSheetState extends State<_ManualSheet> {
       ),
     );
   }
+}
+
+/// Choix du mode de saisie manuelle : dimensions du champ ou points GPS.
+class _ModeSheet extends StatelessWidget {
+  const _ModeSheet();
+
+  Widget _tile(
+          IconData icon, Color bg, String title, String sub, String result) =>
+      Pressable(
+        scale: .98,
+        onTap: () => Get.back(result: result),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+              color: Colors.white, borderRadius: BorderRadius.circular(20)),
+          child: Row(children: [
+            IconTile(icon, bg: bg, fg: AppColors.forest),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: jakarta(14, weight: FontWeight.w700)),
+                    Text(sub, style: jakarta(12, color: AppColors.muted)),
+                  ]),
+            ),
+            const Sym(Symbols.chevron_right_rounded,
+                size: 22, color: AppColors.faint),
+          ]),
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) => Container(
+        decoration: const BoxDecoration(
+            color: AppColors.cream,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
+        padding: EdgeInsets.fromLTRB(
+            16, 18, 16, 16 + MediaQuery.paddingOf(context).bottom),
+        child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 0, 4, 12),
+                child: Text('Saisir la parcelle à la main',
+                    style:
+                        jakarta(16, weight: FontWeight.w800, tracking: -.01)),
+              ),
+              _tile(
+                  Symbols.pin_drop_rounded,
+                  AppColors.lime,
+                  'Points GPS',
+                  'Latitude et longitude de chaque angle · surface calculée',
+                  'points'),
+              const SizedBox(height: 8),
+              _tile(Symbols.straighten_rounded, AppColors.sage, 'Dimensions',
+                  'Longueur × largeur d\'un champ rectangulaire', 'size'),
+            ]),
+      );
+}
+
+/// Une ligne de la saisie par points : latitude, longitude et « Me localiser ».
+class _PointRow {
+  final lat = TextEditingController();
+  final lng = TextEditingController();
+  bool locating = false;
+
+  static double? _num(String s, double max) {
+    final v = double.tryParse(s.trim().replaceAll(',', '.'));
+    return v != null && v.abs() <= max ? v : null;
+  }
+
+  geo.LatLng? get point {
+    final a = _num(lat.text, 90), o = _num(lng.text, 180);
+    return a == null || o == null ? null : geo.LatLng(a, o);
+  }
+
+  void dispose() {
+    lat.dispose();
+    lng.dispose();
+  }
+}
+
+/// Saisie des angles de la parcelle par latitude/longitude. Au moins 3 points, dans l'ordre
+/// du tour du champ. « Me localiser » remplit le point avec la position GPS actuelle ; la
+/// surface se calcule au fil de la saisie.
+class _PointsSheet extends StatefulWidget {
+  const _PointsSheet();
+
+  @override
+  State<_PointsSheet> createState() => _PointsSheetState();
+}
+
+class _PointsSheetState extends State<_PointsSheet> {
+  final _rows = [_PointRow(), _PointRow(), _PointRow(), _PointRow()];
+
+  @override
+  void dispose() {
+    for (final r in _rows) {
+      r.dispose();
+    }
+    super.dispose();
+  }
+
+  List<geo.LatLng>? get _points {
+    final pts = [for (final r in _rows) r.point];
+    return pts.contains(null) ? null : [for (final p in pts) p!];
+  }
+
+  double get _ha {
+    final pts = _points;
+    return pts == null || pts.length < 3
+        ? 0
+        : geo.SphericalUtil.computeArea(pts) / 10000;
+  }
+
+  bool get _ok => _points != null && _ha > 0;
+
+  Future<void> _locate(_PointRow r) async {
+    setState(() => r.locating = true);
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) {
+        showToast('Activez la localisation du téléphone.',
+            icon: Symbols.location_off_rounded);
+        return;
+      }
+      var perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
+      if (perm == LocationPermission.denied ||
+          perm == LocationPermission.deniedForever) {
+        showToast("Accès à la position refusé. Autorisez-le dans les réglages.",
+            icon: Symbols.block_rounded);
+        return;
+      }
+      final p = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+              accuracy: LocationAccuracy.best,
+              timeLimit: Duration(seconds: 20)));
+      r.lat.text = p.latitude.toStringAsFixed(6);
+      r.lng.text = p.longitude.toStringAsFixed(6);
+      if (p.accuracy > SurveyController.weakAbove) {
+        showToast(
+            'Signal faible (±${p.accuracy.round()} m) · réessayez à découvert.',
+            icon: Symbols.signal_cellular_alt_1_bar_rounded);
+      }
+    } on TimeoutException {
+      showToast('Position introuvable. Réessayez à découvert.',
+          icon: Symbols.location_searching_rounded);
+    } catch (_) {
+      showToast('Position indisponible sur ce téléphone.',
+          icon: Symbols.location_off_rounded);
+    } finally {
+      if (mounted) setState(() => r.locating = false);
+    }
+  }
+
+  Widget _coord(String label, TextEditingController c) => Expanded(
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+          decoration: BoxDecoration(
+              color: Colors.white, borderRadius: BorderRadius.circular(14)),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(label,
+                style: jakarta(9.5,
+                    weight: FontWeight.w700, color: AppColors.muted)),
+            TextField(
+              controller: c,
+              onChanged: (_) => setState(() {}),
+              keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true, signed: true),
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'[0-9.,\-]')),
+                LengthLimitingTextInputFormatter(12)
+              ],
+              style: jakarta(15, weight: FontWeight.w800),
+              decoration: InputDecoration(
+                  border: InputBorder.none,
+                  isCollapsed: true,
+                  hintText: '0.000000',
+                  hintStyle: jakarta(15,
+                      weight: FontWeight.w800, color: AppColors.faint)),
+            ),
+          ]),
+        ),
+      );
+
+  Widget _row(int i) {
+    final r = _rows[i];
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+          color: AppColors.sage, borderRadius: BorderRadius.circular(20)),
+      child: Column(children: [
+        Row(children: [
+          Text('Point ${i + 1}', style: jakarta(13, weight: FontWeight.w800)),
+          const Spacer(),
+          Pressable(
+            onTap: r.locating ? null : () => _locate(r),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              decoration: BoxDecoration(
+                  color: AppColors.forest,
+                  borderRadius: BorderRadius.circular(99)),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                r.locating
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: AppColors.lime))
+                    : const Sym(Symbols.my_location_rounded,
+                        size: 16, color: AppColors.lime),
+                const SizedBox(width: 6),
+                Text(r.locating ? 'Recherche…' : 'Me localiser',
+                    style: jakarta(12,
+                        weight: FontWeight.w700, color: Colors.white)),
+              ]),
+            ),
+          ),
+          if (_rows.length > 3) ...[
+            const SizedBox(width: 6),
+            Pressable(
+              onTap: () => setState(() => _rows.removeAt(i).dispose()),
+              child: const Padding(
+                padding: EdgeInsets.all(6),
+                child: Sym(Symbols.close_rounded,
+                    size: 18, color: AppColors.muted),
+              ),
+            ),
+          ],
+        ]),
+        const SizedBox(height: 8),
+        Row(children: [
+          _coord('LATITUDE', r.lat),
+          const SizedBox(width: 8),
+          _coord('LONGITUDE', r.lng),
+        ]),
+      ]),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pts = _points;
+    final ha = _ha;
+    final perimeter = pts == null
+        ? 0.0
+        : geo.SphericalUtil.computeLength([...pts, pts.first]).toDouble();
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+      child: Container(
+        constraints:
+            BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * .88),
+        decoration: const BoxDecoration(
+            color: AppColors.cream,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
+        padding: EdgeInsets.fromLTRB(
+            16, 20, 16, 16 + MediaQuery.paddingOf(context).bottom),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Row(children: [
+            const IconTile(Symbols.pin_drop_rounded,
+                bg: AppColors.lime, fg: AppColors.forest, iconSize: 24),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Saisir les points',
+                        style: jakarta(18,
+                            weight: FontWeight.w800, tracking: -.02)),
+                    Text('3 points minimum, en faisant le tour du champ',
+                        style: jakarta(12, color: AppColors.muted)),
+                  ]),
+            ),
+          ]),
+          const SizedBox(height: 14),
+          Flexible(
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                for (var i = 0; i < _rows.length; i++) _row(i),
+                if (_rows.length < 12)
+                  Pressable(
+                    onTap: () => setState(() => _rows.add(_PointRow())),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      decoration: BoxDecoration(
+                          border: Border.all(color: AppColors.faint),
+                          borderRadius: BorderRadius.circular(16)),
+                      child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Sym(Symbols.add_rounded,
+                                size: 18, color: AppColors.forest),
+                            const SizedBox(width: 6),
+                            Text('Ajouter un point',
+                                style: jakarta(13,
+                                    weight: FontWeight.w700,
+                                    color: AppColors.forest)),
+                          ]),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          AnimatedContainer(
+            duration: Motion.medium,
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(
+                color: _ok ? AppColors.lime : AppColors.sage,
+                borderRadius: BorderRadius.circular(18)),
+            child: Row(children: [
+              Expanded(
+                child: Text(
+                  _ok
+                      ? 'Surface calculée · périmètre ${_fmtM(perimeter)}'
+                      : pts == null
+                          ? 'Remplissez tous les points'
+                          : 'Les points ne forment pas une surface',
+                  style: jakarta(12.5,
+                      weight: FontWeight.w600, color: AppColors.forest),
+                ),
+              ),
+              if (_ok)
+                CountUp(
+                  value: ha,
+                  decimals: 2,
+                  suffix: ' ha',
+                  duration: const Duration(milliseconds: 400),
+                  style: jakarta(24,
+                      weight: FontWeight.w800,
+                      tracking: -.02,
+                      color: AppColors.forest),
+                ),
+            ]),
+          ),
+          const SizedBox(height: 12),
+          SwipeCta.dark(
+            label: 'Glissez pour enregistrer',
+            busyLabel: 'Enregistrement…',
+            onConfirm: _ok ? () => Get.back(result: pts) : null,
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+/// Écran d'accueil du relevé : trois façons de relever la parcelle.
+class _ModePicker extends StatelessWidget {
+  const _ModePicker({super.key, required this.c});
+  final SurveyController c;
+
+  Widget _option(int i, IconData icon, Color bg, String title, String text,
+          {String? tag}) =>
+      FadeSlideIn(
+        delay: Motion.stagger(i, base: 180, step: 70),
+        offset: const Offset(0, 26),
+        child: Pressable(
+          scale: .97,
+          onTap: () => c.choose(i),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+                color: Colors.white, borderRadius: BorderRadius.circular(24)),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              IconTile(icon,
+                  size: 48,
+                  radius: 16,
+                  bg: bg,
+                  fg: AppColors.forest,
+                  iconSize: 26),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(children: [
+                        Flexible(
+                          child: Text(title,
+                              style: jakarta(16,
+                                  weight: FontWeight.w800, tracking: -.01)),
+                        ),
+                        if (tag != null) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                                color: AppColors.lime,
+                                borderRadius: BorderRadius.circular(99)),
+                            child: Text(tag,
+                                style: jakarta(10,
+                                    weight: FontWeight.w800,
+                                    color: AppColors.forest)),
+                          ),
+                        ],
+                      ]),
+                      const SizedBox(height: 4),
+                      Text(text,
+                          style: jakarta(12.5,
+                              color: AppColors.muted, height: 1.35)),
+                    ]),
+              ),
+              const SizedBox(width: 6),
+              const Padding(
+                padding: EdgeInsets.only(top: 12),
+                child: Sym(Symbols.chevron_right_rounded,
+                    size: 22, color: AppColors.faint),
+              ),
+            ]),
+          ),
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) => ColoredBox(
+        color: _ground,
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              FadeSlideIn(
+                offset: const Offset(0, -20),
+                child: _Glass(
+                    onTap: Get.back,
+                    child:
+                        const Sym(Symbols.close_rounded, color: Colors.white)),
+              ),
+              const SizedBox(height: 24),
+              FadeSlideIn(
+                delay: const Duration(milliseconds: 80),
+                child: Text('Comment relever\nla parcelle ?',
+                    style: display(30, color: Colors.white, height: 1.1)),
+              ),
+              const SizedBox(height: 8),
+              FadeSlideIn(
+                delay: const Duration(milliseconds: 140),
+                child: Text('Producteur · ${c.owner.name}',
+                    style: jakarta(13, color: AppColors.white(.7))),
+              ),
+              const SizedBox(height: 22),
+              _option(0, Symbols.photo_camera_rounded, AppColors.lime, 'Caméra',
+                  "Visez chaque angle avec l'appareil photo et touchez +. Position GPS réelle.",
+                  tag: 'Recommandé'),
+              const SizedBox(height: 10),
+              _option(1, Symbols.map_rounded, AppColors.sage, 'Plan',
+                  'Marchez le long du champ et posez les angles sur un plan vu du dessus.'),
+              const SizedBox(height: 10),
+              _option(
+                  2,
+                  Symbols.edit_note_rounded,
+                  AppColors.amberSoft,
+                  'Saisie manuelle',
+                  'Entrez les coordonnées de chaque angle, ou la longueur et la largeur du champ.'),
+            ]),
+          ),
+        ),
+      );
 }

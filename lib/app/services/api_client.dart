@@ -32,7 +32,9 @@ class ApiException implements Exception {
         'UNAUTHORIZED' =>
           'Session expirée. Reconnectez-vous.',
         'FORBIDDEN' => "Vous n'avez pas accès à cette information.",
-        'BAD_REQUEST' => 'Vérifiez les informations saisies.',
+        'BAD_REQUEST' => message.isEmpty
+            ? 'Vérifiez les informations saisies.'
+            : 'Vérifiez les informations saisies : $message',
         _ => message.isEmpty ? 'Une erreur est survenue.' : message,
       };
 
@@ -140,6 +142,35 @@ class ApiClient extends GetxService {
 
   Future<dynamic> patch(String path, {Object? body}) =>
       request('PATCH', path, body: body);
+
+  /// Envoi d'un fichier (multipart). Même renouvellement de session que [request].
+  Future<dynamic> postFile(String path, String filePath,
+      {String field = 'file'}) async {
+    Future<http.Response> once() async {
+      final req = http.MultipartRequest('POST', _uri(path))
+        ..headers['Accept'] = 'application/json'
+        ..files.add(await http.MultipartFile.fromPath(field, filePath));
+      if (_accessToken != null) {
+        req.headers['Authorization'] = 'Bearer $_accessToken';
+      }
+      try {
+        final streamed = await req.send().timeout(ApiConfig.timeout * 3);
+        return await http.Response.fromStream(streamed);
+      } on TimeoutException {
+        throw const ApiException('NETWORK', 'Délai dépassé');
+      } on SocketException {
+        throw const ApiException('NETWORK', 'Réseau indisponible');
+      } on http.ClientException {
+        throw const ApiException('NETWORK', 'Réseau indisponible');
+      }
+    }
+
+    var res = await once();
+    if (res.statusCode == 401 && _refreshToken != null && await _refresh()) {
+      res = await once();
+    }
+    return _decodeOrThrow(res);
+  }
 
   Future<http.Response> _send(String method, String path,
       {Object? body, Map<String, dynamic>? query}) async {

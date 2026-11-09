@@ -13,6 +13,7 @@ import '../../services/network_service.dart';
 import '../../services/session_service.dart';
 import '../../widgets/animations.dart';
 import '../../widgets/buttons.dart';
+import '../../widgets/confirm_sheet.dart';
 import '../../widgets/layout.dart';
 import 'shell.dart';
 
@@ -133,6 +134,24 @@ class ProfileTab extends StatelessWidget {
                 onTap: () => Get.offAllNamed(Routes.unlock),
               )),
               row(_Setting(
+                icon: Symbols.logout_rounded,
+                title: 'Se déconnecter',
+                sub: 'Efface la session et les données de cet appareil',
+                onTap: () async {
+                  final ok = await confirmSheet(
+                    title: 'Se déconnecter ?',
+                    message:
+                        'La session et les données enregistrées sur ce téléphone seront effacées. Vous devrez vous reconnecter.',
+                    confirmLabel: 'Se déconnecter',
+                    icon: Symbols.logout_rounded,
+                    destructive: true,
+                  );
+                  if (!ok) return;
+                  Get.find<SessionService>().revoke();
+                  Get.offAllNamed(Routes.phone);
+                },
+              )),
+              row(_Setting(
                 icon: Symbols.mobile_off_rounded,
                 title: 'Simuler une révocation',
                 sub: 'Prototype',
@@ -182,15 +201,20 @@ Future<void> _connectApi(BuildContext context) async {
         ],
       ),
       actions: [
-        TextButton(onPressed: () => Get.back(result: false), child: const Text('Annuler')),
-        TextButton(onPressed: () => Get.back(result: true), child: const Text('Connecter')),
+        TextButton(
+            onPressed: () => Get.back(result: false),
+            child: const Text('Annuler')),
+        TextButton(
+            onPressed: () => Get.back(result: true),
+            child: const Text('Connecter')),
       ],
     ),
   );
   if (ok != true) return;
   try {
     final auth = Get.find<AuthService>();
-    final challenge = await auth.signIn(email: email.text.trim(), password: password.text);
+    final challenge =
+        await auth.signIn(email: email.text.trim(), password: password.text);
     await auth.verifyOtp(challengeId: challenge.id, code: otp.text.trim());
     final me = await auth.me();
     final scoop = me.scoopName ?? me.role;

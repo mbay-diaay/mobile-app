@@ -115,7 +115,7 @@ class PendingItem {
 class Plot {
   const Plot(this.code, this.area, this.crops, this.status, this.statusBg,
       this.statusInk,
-      {this.remoteId, this.areaHa = 0, this.lat, this.lng});
+      {this.remoteId, this.areaHa = 0, this.lat, this.lng, this.label});
   final String code;
   final String area;
   final String crops;
@@ -131,9 +131,13 @@ class Plot {
   final double? lat;
   final double? lng;
 
+  /// Nom affiché (celui du serveur) ; à défaut, le code.
+  final String? label;
+  String get title => label ?? code;
+
   Plot withRemoteId(String id) =>
       Plot(code, area, crops, status, statusBg, statusInk,
-          remoteId: id, areaHa: areaHa, lat: lat, lng: lng);
+          remoteId: id, areaHa: areaHa, lat: lat, lng: lng, label: label);
 }
 
 class Crop {
@@ -357,13 +361,6 @@ abstract final class MockData {
     PendingItem(Symbols.person_add_rounded, 'Nouvelle fiche · Coumba Ndiaye'),
     PendingItem(Symbols.pentagon_rounded, 'Parcelle relevée · PA-0034'),
     PendingItem(Symbols.photo_camera_rounded, 'Photo · Coumba Ndiaye'),
-  ];
-
-  static const plots = [
-    Plot('PA-0006', '0,43 ha', 'Carotte, Aubergine', 'Relevée',
-        AppColors.blueSoft, AppColors.blueInk),
-    Plot('PA-0012', '0,20 ha', 'Oignon', 'Validée', AppColors.lime,
-        AppColors.forest),
   ];
 
   static const villages = [

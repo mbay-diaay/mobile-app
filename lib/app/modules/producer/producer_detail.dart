@@ -1,5 +1,9 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get/get.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../../core/app_colors.dart';
@@ -7,11 +11,14 @@ import '../../core/app_text.dart';
 import '../../core/app_theme.dart';
 import '../../data/mock_data.dart';
 import '../../routes/app_routes.dart';
+import '../../services/producers_service.dart';
 import '../../services/session_service.dart';
 import '../../widgets/animations.dart';
 import '../../widgets/buttons.dart';
 import '../../widgets/confirm_sheet.dart';
 import '../../widgets/layout.dart';
+import '../../widgets/retry.dart';
+import 'new_producer.dart' show SourceSheet;
 
 /// 10 · Fiche producteur, avec les onglets Parcelles et Alertes (ajoutés).
 class ProducerDetailController extends GetxController {
@@ -23,6 +30,19 @@ class ProducerDetailController extends GetxController {
   void onInit() {
     super.onInit();
     if (!p.value.archived) session.visit(p.value);
+    _loadPlots();
+  }
+
+  /// Parcelles et cultures lues sur le serveur ; en cas d'erreur : la raison et « Réessayer ».
+  final loadingPlots = false.obs;
+  Future<void> _loadPlots() async {
+    loadingPlots.value = true;
+    try {
+      await runWithRetry(() => session.loadPlots(p.value),
+          title: 'Parcelles non chargées');
+    } finally {
+      loadingPlots.value = false;
+    }
   }
 
   List<Plot> get plots => session.plotsOf(p.value);
@@ -102,6 +122,68 @@ class ProducerDetailController extends GetxController {
   void restore() {
     p.value = session.restoreProducer(p.value);
     showToast('Fiche restaurée', icon: Symbols.unarchive_rounded);
+  }
+
+  // ───────── Photo CNI sur une fiche existante
+  final _picker = ImagePicker();
+  final uploadingCni = false.obs;
+
+  /// Ajoute ou remplace le recto/verso de la CNI depuis la fiche.
+  Future<void> uploadCniPhoto({required bool front}) async {
+    if (_guardArchived()) return;
+    final remoteId = p.value.remoteId;
+    if (remoteId == null) {
+      showToast('Fiche non synchronisée avec le serveur.',
+          icon: Symbols.cloud_off_rounded);
+      return;
+    }
+    final source = await Get.bottomSheet<ImageSource>(
+      SourceSheet(front: front, hasPhoto: false),
+      barrierColor: const Color(0x8C0A140F),
+      enterBottomSheetDuration: const Duration(milliseconds: 380),
+    );
+    if (source == null) return;
+    XFile? shot;
+    try {
+      shot = await _picker.pickImage(
+        source: source,
+        preferredCameraDevice: CameraDevice.rear,
+        maxWidth: 1600,
+        imageQuality: 80,
+      );
+    } on PlatformException {
+      if (source == ImageSource.camera) {
+        showToast('Appareil photo indisponible · choix dans la galerie',
+            icon: Symbols.no_photography_rounded);
+        try {
+          shot = await _picker.pickImage(
+              source: ImageSource.gallery, maxWidth: 1600, imageQuality: 80);
+        } on PlatformException {
+          showToast('Accès aux photos refusé. Autorisez-le dans les réglages.',
+              icon: Symbols.block_rounded);
+        }
+      } else {
+        showToast('Accès aux photos refusé. Autorisez-le dans les réglages.',
+            icon: Symbols.block_rounded);
+      }
+    }
+    if (shot == null) return;
+    uploadingCni.value = true;
+    try {
+      final ok = await runWithRetry(
+        () => Get.find<ProducersService>()
+            .uploadCniPhoto(remoteId, shot!.path),
+        title: front ? 'Photo recto non envoyée' : 'Photo verso non envoyée',
+      );
+      if (ok) {
+        showToast(
+          front ? 'Photo recto envoyée' : 'Photo verso envoyée',
+          icon: Symbols.check_circle_rounded,
+        );
+      }
+    } finally {
+      uploadingCni.value = false;
+    }
   }
 
   /// La maquette montre une mise à jour serveur sur la fiche de Seynabou Seck.
@@ -354,7 +436,7 @@ class _MenuSheet extends StatelessWidget {
                   bg: AppColors.sage,
                   fg: AppColors.forest,
                   title: 'Modifier la fiche',
-                  sub: 'Nom, village, téléphone, organisation…',
+                  sub: 'Nom, village, téléphone…',
                   onTap: () => Get.back(result: 'edit'),
                 ),
                 const SizedBox(height: 8),
@@ -557,9 +639,103 @@ class _InfoTab extends StatelessWidget {
             delay: Motion.stagger(4, base: 60, step: 50),
             offset: const Offset(20, 0),
             child: _InfoRow('Organisation', p.org, last: true)),
+        // ── Photo CNI
+        FadeSlideIn(
+          delay: Motion.stagger(5, base: 60, step: 50),
+          offset: const Offset(20, 0),
+          child: Obx(() {
+            final c = Get.find<ProducerDetailController>();
+            final uploading = c.uploadingCni.value;
+            final hasRemote = p.remoteId != null;
+            return Container(
+              margin: const EdgeInsets.only(top: 10),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                  color: AppColors.sage, borderRadius: BorderRadius.circular(16)),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  const Sym(Symbols.badge_rounded, size: 18, color: AppColors.forest),
+                  const SizedBox(width: 8),
+                  Text('Photos de la CNI',
+                      style: jakarta(12, weight: FontWeight.w800)),
+                  const Spacer(),
+                  if (!hasRemote)
+                    Text('Fiche locale',
+                        style: jakarta(10, color: AppColors.muted)),
+                ]),
+                const SizedBox(height: 8),
+                Row(children: [
+                  Expanded(
+                    child: _CniSlotButton(
+                      label: 'Recto',
+                      enabled: hasRemote && !uploading,
+                      onTap: () => c.uploadCniPhoto(front: true),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _CniSlotButton(
+                      label: 'Verso',
+                      enabled: hasRemote && !uploading,
+                      onTap: () => c.uploadCniPhoto(front: false),
+                    ),
+                  ),
+                ]),
+                if (uploading)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Row(children: [
+                      const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: AppColors.forest)),
+                      const SizedBox(width: 8),
+                      Text('Envoi en cours…',
+                          style: jakarta(11, color: AppColors.muted)),
+                    ]),
+                  ),
+              ]),
+            );
+          }),
+        ),
       ]),
     );
   }
+}
+
+/// Bouton d'envoi d'une face de la CNI.
+class _CniSlotButton extends StatelessWidget {
+  const _CniSlotButton(
+      {required this.label, required this.enabled, required this.onTap});
+  final String label;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Pressable(
+        onTap: enabled ? onTap : null,
+        child: AnimatedContainer(
+          duration: Motion.medium,
+          height: 44,
+          decoration: BoxDecoration(
+            color: enabled ? Colors.white : AppColors.white(.5),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+                color: enabled ? AppColors.forest : AppColors.faint, width: 1.5),
+          ),
+          alignment: Alignment.center,
+          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Sym(Symbols.photo_camera_rounded,
+                size: 18, color: enabled ? AppColors.forest : AppColors.muted),
+            const SizedBox(width: 6),
+            Text(label,
+                style: jakarta(13,
+                    weight: FontWeight.w700,
+                    color: enabled ? AppColors.forest : AppColors.muted)),
+          ]),
+        ),
+      );
 }
 
 class _InfoRow extends StatelessWidget {
@@ -588,7 +764,15 @@ class _PlotsTab extends StatelessWidget {
   final ProducerDetailController c;
 
   @override
-  Widget build(BuildContext context) => Column(children: [
+  Widget build(BuildContext context) => Obx(_list);
+
+  Widget _list() => Column(children: [
+        if (c.loadingPlots.value && c.plots.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 24),
+            child: Text('Chargement des parcelles…',
+                style: jakarta(12, color: AppColors.muted)),
+          ),
         for (final (i, plot) in c.plots.indexed) ...[
           FadeSlideIn(
             delay: Motion.stagger(i, base: 60),
@@ -610,7 +794,7 @@ class _PlotsTab extends StatelessWidget {
                     child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('${plot.code} · ${plot.area}',
+                          Text('${plot.title} · ${plot.area}',
                               style: jakarta(13, weight: FontWeight.w800)),
                           Text(plot.crops,
                               style: jakarta(11, color: AppColors.muted)),
@@ -638,7 +822,7 @@ class _PlotsTab extends StatelessWidget {
             height: 48,
             radius: 16,
             size: 13,
-            onTap: () => Get.toNamed(Routes.survey, arguments: c.p),
+            onTap: () => Get.toNamed(Routes.survey, arguments: c.p.value),
           ),
         ),
       ]);

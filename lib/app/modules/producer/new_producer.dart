@@ -18,6 +18,7 @@ import '../../widgets/animations.dart';
 import '../../widgets/buttons.dart';
 import '../../widgets/confirm_sheet.dart';
 import '../../widgets/layout.dart';
+import '../../widgets/retry.dart';
 import '../../widgets/senegal_flag.dart';
 
 /// 11 · Nouveau producteur, et 12 · suggestion de doublon (panneau qui monte).
@@ -66,12 +67,10 @@ class NewProducerController extends GetxController {
       org.value = e.org;
       _formOk.value = true;
       _initial = _snapshot();
-      for (final c in [first, last, age, phone]) {
+      for (final c in [first, last, phone]) {
         c.addListener(_recompute);
       }
-      ever(sex, (_) => _recompute());
       ever(village, (_) => _recompute());
-      ever(org, (_) => _recompute());
     }
     for (final c in [first, last]) {
       c.addListener(() => _formOk.value =
@@ -82,11 +81,8 @@ class NewProducerController extends GetxController {
   String _snapshot() => [
         first.text.trim(),
         last.text.trim(),
-        age.text,
         phone.text,
-        sex.value,
-        village.value,
-        org.value
+        village.value
       ].join('|');
   void _recompute() => dirty.value = _snapshot() != _initial;
 
@@ -110,26 +106,38 @@ class NewProducerController extends GetxController {
   bool get hasCni => cniFront.value != null && cniBack.value != null;
   bool get canSave => _formOk.value && (isEdit ? dirty.value : hasCni);
 
-  /// Ouvre l'appareil photo (caméra arrière) pour une face de la CNI.
-  /// Sans caméra (simulateur), on se rabat sur la photothèque.
+  /// Propose « Prendre une photo » ou « Choisir dans la galerie » pour une face de la CNI.
+  /// Sans caméra (simulateur), on se rabat sur la galerie.
   Future<void> takeCni({required bool front}) async {
     FocusManager.instance.primaryFocus?.unfocus();
+    final source = await Get.bottomSheet<ImageSource>(
+      SourceSheet(
+          front: front, hasPhoto: (front ? cniFront : cniBack).value != null),
+      barrierColor: const Color(0x8C0A140F),
+      enterBottomSheetDuration: const Duration(milliseconds: 380),
+    );
+    if (source == null) return;
     XFile? shot;
     try {
       shot = await _picker.pickImage(
-        source: ImageSource.camera,
+        source: source,
         preferredCameraDevice: CameraDevice.rear,
         maxWidth: 1600,
         imageQuality: 80,
       );
     } on PlatformException {
-      showToast('Appareil photo indisponible · choix dans la photothèque',
-          icon: Symbols.no_photography_rounded);
-      try {
-        shot = await _picker.pickImage(
-            source: ImageSource.gallery, maxWidth: 1600, imageQuality: 80);
-      } on PlatformException {
-        showToast("Accès aux photos refusé. Autorisez-le dans les réglages.",
+      if (source == ImageSource.camera) {
+        showToast('Appareil photo indisponible · choix dans la galerie',
+            icon: Symbols.no_photography_rounded);
+        try {
+          shot = await _picker.pickImage(
+              source: ImageSource.gallery, maxWidth: 1600, imageQuality: 80);
+        } on PlatformException {
+          showToast('Accès aux photos refusé. Autorisez-le dans les réglages.',
+              icon: Symbols.block_rounded);
+        }
+      } else {
+        showToast('Accès aux photos refusé. Autorisez-le dans les réglages.',
             icon: Symbols.block_rounded);
       }
     }
@@ -170,9 +178,9 @@ class NewProducerController extends GetxController {
       first: _cap(first.text),
       last: last.text.trim().isEmpty ? '' : _cap(last.text),
       village: village.value,
-      org: org.value,
-      sex: sex.value == 1 ? 'Homme' : 'Femme',
-      age: int.tryParse(age.text),
+      org: editing!.org,
+      sex: editing!.sex,
+      age: editing!.age,
       phone: phone.text,
     );
     saving.value = false;
@@ -204,32 +212,36 @@ class NewProducerController extends GetxController {
     String? serverCode;
     String? serverId;
 
-    // Si session API ouverte + réseau : le serveur valide la création (dernier mot).
+    // Le serveur valide la création (dernier mot) : en cas d'erreur, la raison s'affiche
+    // et on peut réessayer ; « Annuler » laisse le formulaire tel quel.
     final producersApi = Get.find<ProducersService>();
+    var photoFailed = false;
     if (producersApi.canReachServer) {
-      try {
-        final remote = await producersApi.create(
+      Map<String, dynamic>? remote;
+      final created = await runWithRetry(() async {
+        remote = await producersApi.create(
           firstName: firstName,
           lastName: lastName,
           village: village.value,
           phone: phone.text,
           cni: cni.text.trim().isEmpty ? null : cni.text.trim(),
         );
-        if (remote != null) {
-          synced = true;
-          serverCode = remote['code'] as String?;
-          serverId = remote['id'] as String?;
-          if (serverId != null && hasCni) {
-            if (cniFront.value != null) {
-              await producersApi.uploadCniPhoto(serverId, cniFront.value!);
-            }
-            if (cniBack.value != null) {
-              await producersApi.uploadCniPhoto(serverId, cniBack.value!);
-            }
-          }
+      }, title: 'Fiche non enregistrée');
+      if (!created) {
+        saving.value = false;
+        return;
+      }
+      if (remote != null) {
+        synced = true;
+        serverCode = remote!['code'] as String?;
+        serverId = remote!['id'] as String?;
+        for (final path in [cniFront.value, cniBack.value]) {
+          if (serverId == null || path == null) continue;
+          final sent = await runWithRetry(
+              () => producersApi.uploadCniPhoto(serverId!, path),
+              title: 'Photo de CNI non envoyée');
+          if (!sent) photoFailed = true;
         }
-      } catch (_) {
-        // Hors ligne / erreur serveur : on garde la fiche locale en attente.
       }
     }
 
@@ -237,19 +249,20 @@ class NewProducerController extends GetxController {
       first: firstName,
       last: lastName,
       village: village.value,
-      org: org.value,
-      sex: sex.value == 1 ? 'Homme' : 'Femme',
-      age: int.tryParse(age.text),
+      org: '—', // l'API ne gère ni organisation, ni sexe, ni âge
+      sex: '—',
+      age: null,
       phone: phone.text,
       cniPhotos: hasCni,
       code: serverCode,
+      remoteId: serverId,
       synced: synced,
     );
     saving.value = false;
     Get.offNamed(Routes.success, arguments: {
       'title': 'Fiche enregistrée',
       'sub': synced
-          ? '${p.name} · ${p.code} · statut « recensé ».\nEnregistrée sur le serveur.'
+          ? '${p.name} · ${p.code} · statut « recensé ».\nEnregistrée sur le serveur.${photoFailed ? '\nUne photo de CNI n\'a pas été envoyée.' : ''}'
           : '${p.name} · ${p.code} · statut « recensé ».\nElle partira au prochain envoi.',
       'cta': 'Relever sa parcelle',
       'route': Routes.survey,
@@ -359,47 +372,21 @@ class NewProducerView extends GetView<NewProducerController> {
                             caps: true)),
                   ])),
                   const SizedBox(height: 11),
-                  item(Obx(() => SegmentedPill(
-                        labels: const ['Femme', 'Homme'],
-                        index: controller.sex.value,
-                        onChanged: (v) => controller.sex.value = v,
-                        dark: true,
-                        fontSize: 13,
-                        vPad: 11,
-                      ))),
-                  const SizedBox(height: 11),
-                  item(Row(children: [
-                    SizedBox(
-                        width: 90,
-                        child: _Field(
-                            label: 'Âge',
-                            controller: controller.age,
-                            number: true,
-                            max: 3)),
-                    const SizedBox(width: 8),
-                    Expanded(
-                        child: _Field(
-                      label: 'Téléphone',
-                      controller: controller.phone,
-                      number: true,
-                      max: 9,
-                      prefix: '+221',
-                      hint: '77 123 45 67',
-                      leading: const SenegalFlag(size: Size(18, 12)),
-                    )),
-                  ])),
+                  item(_Field(
+                    label: 'Téléphone',
+                    controller: controller.phone,
+                    number: true,
+                    max: 9,
+                    prefix: '+221',
+                    hint: '77 123 45 67',
+                    leading: const SenegalFlag(size: Size(18, 12)),
+                  )),
                   const SizedBox(height: 11),
                   item(Obx(() => _Select(
                       label: 'Village *',
                       value: controller.village.value,
                       options: MockData.villages,
                       onPick: controller.village.call))),
-                  const SizedBox(height: 11),
-                  item(Obx(() => _Select(
-                      label: 'Organisation',
-                      value: controller.org.value,
-                      options: MockData.orgs,
-                      onPick: controller.org.call))),
                   const SizedBox(height: 11),
                   if (!controller.isEdit) ...[
                     item(Column(
@@ -411,8 +398,6 @@ class NewProducerView extends GetView<NewProducerController> {
                             number: true,
                             max: 13,
                             hint: '13 chiffres',
-                            trailing: const Sym(Symbols.lock_rounded,
-                                size: 20, color: AppColors.forest),
                             obscure: true,
                           ),
                           Padding(
@@ -457,7 +442,6 @@ class _Field extends StatefulWidget {
     this.prefix,
     this.leading,
     this.hint,
-    this.trailing,
     this.caps = false,
     this.obscure = false,
   });
@@ -471,7 +455,6 @@ class _Field extends StatefulWidget {
   /// Élément fixe devant la saisie (drapeau de l'indicatif…).
   final Widget? leading;
   final String? hint;
-  final Widget? trailing;
   final bool caps;
   final bool obscure;
 
@@ -481,6 +464,9 @@ class _Field extends StatefulWidget {
 
 class _FieldState extends State<_Field> {
   final _focus = FocusNode();
+
+  /// Champ sensible (CNI) : masqué par défaut, l'œil permet de voir ce qu'on tape.
+  late bool _hidden = widget.obscure;
 
   @override
   void initState() {
@@ -533,7 +519,7 @@ class _FieldState extends State<_Field> {
                           child: TextField(
                             controller: widget.controller,
                             focusNode: _focus,
-                            obscureText: widget.obscure,
+                            obscureText: _hidden,
                             textCapitalization: widget.caps
                                 ? TextCapitalization.words
                                 : TextCapitalization.none,
@@ -559,7 +545,20 @@ class _FieldState extends State<_Field> {
                     ),
                   ]),
             ),
-            if (widget.trailing != null) widget.trailing!,
+            if (widget.obscure)
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => setState(() => _hidden = !_hidden),
+                child: Padding(
+                  padding: const EdgeInsets.all(6),
+                  child: Sym(
+                      _hidden
+                          ? Symbols.visibility_off_rounded
+                          : Symbols.visibility_rounded,
+                      size: 22,
+                      color: AppColors.forest),
+                ),
+              )
           ]),
         ),
       );
@@ -852,8 +851,7 @@ class _CniSlot extends StatelessWidget {
           size: 24, color: AppColors.forest),
       const SizedBox(height: 4),
       Text(label, style: jakarta(13, weight: FontWeight.w800)),
-      Text('Toucher pour photographier',
-          style: jakarta(9, color: AppColors.muted)),
+      Text('Photo ou galerie', style: jakarta(9, color: AppColors.muted)),
     ]);
     return Pressable(
       onTap: onTap,
@@ -913,4 +911,85 @@ class _CniSlot extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Choix de la source d'une photo de CNI : appareil photo ou galerie.
+class SourceSheet extends StatelessWidget {
+  const SourceSheet({required this.front, required this.hasPhoto});
+  final bool front;
+  final bool hasPhoto;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        decoration: const BoxDecoration(
+            color: AppColors.cream,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
+        padding: EdgeInsets.fromLTRB(
+            16, 18, 16, 16 + MediaQuery.paddingOf(context).bottom),
+        child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 0, 4, 12),
+                child: Text(front ? 'CNI · recto' : 'CNI · verso',
+                    style:
+                        jakarta(16, weight: FontWeight.w800, tracking: -.01)),
+              ),
+              SourceTile(
+                icon: Symbols.photo_camera_rounded,
+                bg: AppColors.lime,
+                title: hasPhoto ? 'Reprendre la photo' : 'Prendre une photo',
+                sub: "Avec l'appareil photo",
+                onTap: () => Get.back(result: ImageSource.camera),
+              ),
+              const SizedBox(height: 8),
+              SourceTile(
+                icon: Symbols.photo_library_rounded,
+                bg: AppColors.sage,
+                title: 'Choisir dans la galerie',
+                sub: 'Une photo déjà prise',
+                onTap: () => Get.back(result: ImageSource.gallery),
+              ),
+            ]),
+      );
+}
+
+class SourceTile extends StatelessWidget {
+  const SourceTile(
+      {required this.icon,
+      required this.bg,
+      required this.title,
+      required this.sub,
+      required this.onTap});
+  final IconData icon;
+  final Color bg;
+  final String title;
+  final String sub;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Pressable(
+        scale: .98,
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+              color: Colors.white, borderRadius: BorderRadius.circular(20)),
+          child: Row(children: [
+            IconTile(icon, bg: bg, fg: AppColors.forest),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: jakarta(14, weight: FontWeight.w700)),
+                    Text(sub, style: jakarta(12, color: AppColors.muted)),
+                  ]),
+            ),
+            const Sym(Symbols.chevron_right_rounded,
+                size: 22, color: AppColors.faint),
+          ]),
+        ),
+      );
 }
