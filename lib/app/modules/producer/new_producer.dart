@@ -12,6 +12,7 @@ import '../../core/app_theme.dart';
 import '../../data/mock_data.dart';
 import '../../routes/app_routes.dart';
 import '../../services/network_service.dart';
+import '../../services/producers_service.dart';
 import '../../services/session_service.dart';
 import '../../widgets/animations.dart';
 import '../../widgets/buttons.dart';
@@ -197,22 +198,59 @@ class NewProducerController extends GetxController {
       }
     }
     saving.value = true;
-    await Future.delayed(const Duration(milliseconds: 700));
+    final firstName = _cap(first.text);
+    final lastName = _cap(last.text);
+    var synced = false;
+    String? serverCode;
+    String? serverId;
+
+    // Si session API ouverte + réseau : le serveur valide la création (dernier mot).
+    final producersApi = Get.find<ProducersService>();
+    if (producersApi.canReachServer) {
+      try {
+        final remote = await producersApi.create(
+          firstName: firstName,
+          lastName: lastName,
+          village: village.value,
+          phone: phone.text,
+          cni: cni.text.trim().isEmpty ? null : cni.text.trim(),
+        );
+        if (remote != null) {
+          synced = true;
+          serverCode = remote['code'] as String?;
+          serverId = remote['id'] as String?;
+          if (serverId != null && hasCni) {
+            if (cniFront.value != null) {
+              await producersApi.uploadCniPhoto(serverId, cniFront.value!);
+            }
+            if (cniBack.value != null) {
+              await producersApi.uploadCniPhoto(serverId, cniBack.value!);
+            }
+          }
+        }
+      } catch (_) {
+        // Hors ligne / erreur serveur : on garde la fiche locale en attente.
+      }
+    }
+
     final p = Get.find<SessionService>().addProducer(
-      first: _cap(first.text),
-      last: _cap(last.text),
+      first: firstName,
+      last: lastName,
       village: village.value,
       org: org.value,
       sex: sex.value == 1 ? 'Homme' : 'Femme',
       age: int.tryParse(age.text),
       phone: phone.text,
       cniPhotos: hasCni,
+      code: serverCode,
+      synced: synced,
     );
     saving.value = false;
     Get.offNamed(Routes.success, arguments: {
       'title': 'Fiche enregistrée',
-      'sub':
-          '${p.name} · ${p.code} · statut « recensé ».\nElle partira au prochain envoi.',
+      'sub': synced
+          ? '${p.name} · ${p.code} · statut « recensé ».\nEnregistrée sur le serveur.'
+          : '${p.name} · ${p.code} · statut « recensé ».\nElle partira au prochain envoi.',
       'cta': 'Relever sa parcelle',
       'route': Routes.survey,
       'args': p,

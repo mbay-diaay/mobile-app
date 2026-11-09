@@ -8,6 +8,7 @@ import 'app/routes/app_routes.dart';
 import 'app/services/api_client.dart';
 import 'app/services/auth_service.dart';
 import 'app/services/network_service.dart';
+import 'app/services/producers_service.dart';
 import 'app/services/session_service.dart';
 
 Future<void> main() async {
@@ -18,6 +19,7 @@ Future<void> main() async {
   await Get.putAsync(() => SessionService().init(), permanent: true);
   Get.put(ApiClient(), permanent: true);
   Get.put(AuthService(), permanent: true);
+  Get.put(ProducersService(), permanent: true);
   runApp(const MbayDiaayApp());
 }
 

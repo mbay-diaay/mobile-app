@@ -143,6 +143,8 @@ class SessionService extends GetxService {
     int? age,
     String? phone,
     bool cniPhotos = false,
+    String? code,
+    bool synced = false,
   }) {
     final p = Producer(
       initials: '${first[0]}${last[0]}'.toUpperCase(),
@@ -150,11 +152,11 @@ class SessionService extends GetxService {
       village: village,
       age: age ?? 0,
       tint: MockData.tints[producers.length % MockData.tints.length],
-      code: 'PR-${(_nextProducer++).toString().padLeft(5, '0')}',
+      code: code ?? 'PR-${(_nextProducer++).toString().padLeft(5, '0')}',
       phone: phone == null || phone.isEmpty ? '—' : '+221 $phone',
       sex: sex,
       org: org,
-      isNew: true,
+      isNew: !synced,
       createdAt: DateTime.now(),
     );
     producers.insert(0, p);

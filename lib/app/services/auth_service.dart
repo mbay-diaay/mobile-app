@@ -25,7 +25,7 @@ class AuthService extends GetxService {
   Future<bool> verifyOtp(
       {required String challengeId, required String otp}) async {
     final response = await _client.post('/auth/otp/verify',
-        body: {'challengeId': challengeId, 'otp': otp});
+        body: {'challengeId': challengeId, 'code': otp});
     if (response.statusCode != 200 && response.statusCode != 201) return false;
     final data = ApiClient.decode(response);
     final accessToken = data?['accessToken'] as String?;

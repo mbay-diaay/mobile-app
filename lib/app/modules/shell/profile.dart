@@ -7,6 +7,8 @@ import '../../core/app_text.dart';
 import '../../core/app_theme.dart';
 import '../../data/mock_data.dart' show MockData;
 import '../../routes/app_routes.dart';
+import '../../services/api_client.dart';
+import '../../services/auth_service.dart';
 import '../../services/network_service.dart';
 import '../../services/session_service.dart';
 import '../../widgets/animations.dart';
@@ -100,6 +102,14 @@ class ProfileTab extends StatelessWidget {
                 onTap: net.toggle,
               )),
               row(_Setting(
+                icon: Symbols.cloud_sync_rounded,
+                title: 'Session API (technicien)',
+                sub: Get.find<ApiClient>().accessToken == null
+                    ? 'Non connecté · requis pour créer sur le serveur'
+                    : 'Connecté · créations envoyées au serveur',
+                onTap: () => _connectApi(context),
+              )),
+              row(_Setting(
                 icon: Symbols.smartphone_rounded,
                 title: 'État du téléphone',
                 sub:
@@ -144,6 +154,62 @@ class ProfileTab extends StatelessWidget {
         ),
       ),
     ]);
+  }
+}
+
+/// Connexion API technicien (email + OTP) pour envoyer les créations producteur au serveur.
+Future<void> _connectApi(BuildContext context) async {
+  final email = TextEditingController(text: 'fatou.sarr@cradesc.example');
+  final password = TextEditingController(text: 'Demonstration2026');
+  final otp = TextEditingController(text: '000000');
+  final ok = await Get.dialog<bool>(
+    AlertDialog(
+      title: Text('Session API', style: jakarta(16, weight: FontWeight.w700)),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+              controller: email,
+              decoration: const InputDecoration(labelText: 'E-mail'),
+              keyboardType: TextInputType.emailAddress),
+          TextField(
+              controller: password,
+              decoration: const InputDecoration(labelText: 'Mot de passe'),
+              obscureText: true),
+          TextField(
+              controller: otp,
+              decoration: const InputDecoration(labelText: 'OTP'),
+              keyboardType: TextInputType.number),
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Get.back(result: false), child: const Text('Annuler')),
+        TextButton(onPressed: () => Get.back(result: true), child: const Text('Connecter')),
+      ],
+    ),
+  );
+  if (ok != true) return;
+  try {
+    final auth = Get.find<AuthService>();
+    final challenge = await auth.signIn(email: email.text.trim(), password: password.text);
+    if (challenge == null) {
+      showToast('Identifiants refusés', icon: Symbols.error_rounded);
+      return;
+    }
+    final verified =
+        await auth.verifyOtp(challengeId: challenge, otp: otp.text.trim());
+    if (!verified) {
+      showToast('OTP invalide', icon: Symbols.error_rounded);
+      return;
+    }
+    final me = await auth.me();
+    final scoop = me?['scoopName'] as String? ?? me?['scoopId'] as String? ?? '';
+    showToast(
+      scoop.isEmpty ? 'API connectée' : 'API · $scoop',
+      icon: Symbols.check_circle_rounded,
+    );
+  } catch (_) {
+    showToast('Connexion API impossible', icon: Symbols.cloud_off_rounded);
   }
 }
 

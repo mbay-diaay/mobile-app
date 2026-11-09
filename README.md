@@ -2,7 +2,11 @@
 
 Application Flutter + GetX tirée de la maquette **Mbay Diaay Mobile v2** (Claude Design) : vert forêt, accent citron, fond crème, gros chiffres, cartes très arrondies, et des animations très expressives entre les écrans et les éléments.
 
-C'est un **prototype hors ligne** : aucune API n'est appelée. La connexion utilise des comptes de test, et ce que vous créez est gardé en mémoire jusqu'à la fermeture de l'app.
+C'est un **prototype hors ligne** (données mock en mémoire). La connexion téléphone utilise des comptes de test.
+
+**Créer un producteur sur le serveur** : Profil → « Session API (technicien) » (ex. `fatou.sarr@cradesc.example` / `Demonstration2026` / OTP `000000`) → Producteurs → Nouveau. Si la session API est ouverte et le réseau simulé « Connecté », la fiche part en `POST /v1/producers` (sinon elle reste en attente locale).
+
+Revue technique : [`docs/REVUE_PROTOTYPE_CLEMENT.md`](docs/REVUE_PROTOTYPE_CLEMENT.md).
 
 ## Lancer
 
