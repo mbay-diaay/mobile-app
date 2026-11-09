@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/mock_data.dart';
 import 'api_client.dart';
+import "package:flutter/foundation.dart";
 
 /// Annuaire des producteurs : lu depuis `GET /producers`, gardé en cache local pour
 /// rester consultable hors ligne. L'API n'expose que le code, le nom, la SCOOP, le statut
@@ -27,7 +28,8 @@ class ProducerRepository extends GetxService {
         for (final j in jsonDecode(raw) as List)
           _fromJson(j as Map<String, dynamic>)
       ];
-    } catch (_) {
+    } catch (e) {
+      debugPrint("[ERROR][ProducerRepository.cached] ${e}");
       return const [];
     }
   }
@@ -56,6 +58,7 @@ class ProducerRepository extends GetxService {
       syncedAt.value = DateTime.now();
       return list;
     } on ApiException catch (e) {
+      debugPrint("[ERROR][ProducerRepository.fetch] ${e}");
       lastError.value = e;
       rethrow;
     } finally {
@@ -72,8 +75,8 @@ class ProducerRepository extends GetxService {
       for (final j in data['items'] as List) {
         _scoops[j['id'].toString()] = j['name'].toString();
       }
-    } catch (_) {
-      // Non bloquant : sans nom, on affiche l'identifiant de la SCOOP.
+    } catch (e) {
+      debugPrint("[ERROR][ProducerRepository._loadScoops] ${e}");
     }
   }
 

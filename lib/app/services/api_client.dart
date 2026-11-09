@@ -7,6 +7,7 @@ import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
 
 import 'api_config.dart';
+import "package:flutter/foundation.dart";
 
 /// Erreur renvoyée par l'API (`{ code, message, details? }`) ou par le réseau (`NETWORK`).
 class ApiException implements Exception {
@@ -71,8 +72,8 @@ class ApiClient extends GetxService {
     try {
       _accessToken = await _storage.read(key: _kAccess);
       _refreshToken = await _storage.read(key: _kRefresh);
-    } catch (_) {
-      // Stockage illisible (ex. clé perdue) : on repart sans session.
+    } catch (e) {
+      debugPrint("[ERROR][ApiClient.init] $e");
     }
     return this;
   }
@@ -87,7 +88,9 @@ class ApiClient extends GetxService {
       if (refreshToken != null) {
         await _storage.write(key: _kRefresh, value: refreshToken);
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint("[ERROR][ApiClient.setTokens] $e");
+    }
   }
 
   Future<void> clearTokens() async {
@@ -96,7 +99,9 @@ class ApiClient extends GetxService {
     try {
       await _storage.delete(key: _kAccess);
       await _storage.delete(key: _kRefresh);
-    } catch (_) {}
+    } catch (e) {
+      debugPrint("[ERROR][ApiClient.clearTokens] $e");
+    }
   }
 
   Map<String, String> get _headers => {
@@ -209,7 +214,8 @@ class ApiClient extends GetxService {
     } on ApiException {
       // Réseau coupé : on garde la session, la requête échouera avec NETWORK.
       return true;
-    } catch (_) {
+    } catch (e) {
+      debugPrint("[ERROR][ApiClient._doRefresh] $e");
       return false;
     }
   }
@@ -219,7 +225,9 @@ class ApiClient extends GetxService {
     if (res.body.isNotEmpty) {
       try {
         data = jsonDecode(res.body);
-      } catch (_) {}
+      } catch (e) {
+        debugPrint("[ERROR][ApiClient._decodeOrThrow] $e");
+      }
     }
     if (res.statusCode >= 200 && res.statusCode < 300) return data;
     if (data is Map && data['code'] is String) {

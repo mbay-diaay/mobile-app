@@ -16,6 +16,7 @@ import '../../widgets/buttons.dart';
 import '../../widgets/confirm_sheet.dart';
 import '../../widgets/layout.dart';
 import 'shell.dart';
+import "package:flutter/foundation.dart";
 
 /// 24 · Profil et paramètres. Le réseau simulé se coupe ici.
 class ProfileTab extends StatelessWidget {
@@ -222,7 +223,8 @@ Future<void> _connectApi(BuildContext context) async {
       scoop.isEmpty ? 'API connectée' : 'API · $scoop',
       icon: Symbols.check_circle_rounded,
     );
-  } catch (_) {
+  } catch (e) {
+    debugPrint("[ERROR][Profile._connectApi] ${e}");
     showToast('Connexion API impossible', icon: Symbols.cloud_off_rounded);
   }
 }

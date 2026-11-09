@@ -9,6 +9,7 @@ import '../data/mock_data.dart';
 import 'auth_service.dart';
 import 'api_client.dart';
 import 'producer_repository.dart';
+import "package:flutter/foundation.dart";
 
 /// Technicien connecté (profil renvoyé par l'API).
 class TestAccount {
@@ -145,6 +146,7 @@ class SessionService extends GetxService {
       applyServerProducers(await Get.find<ProducerRepository>().fetch());
       return null;
     } on ApiException catch (e) {
+      debugPrint("[ERROR][SessionService.refreshProducers] ${e}");
       return e;
     }
   }
@@ -295,6 +297,7 @@ class SessionService extends GetxService {
         await _pushPlot(sent, pl);
       }
     } on ApiException catch (e) {
+      debugPrint("[ERROR][SessionService._pushPlot] ${e}");
       lastSyncError.value = e.userMessage;
     }
   }
@@ -315,6 +318,7 @@ class SessionService extends GetxService {
       });
       pending.removeWhere((x) => x.label == 'Modification · ${p.name}');
     } on ApiException catch (e) {
+      debugPrint("[ERROR][SessionService._pushUpdate] ${e}");
       lastSyncError.value = e.userMessage;
     }
   }
@@ -483,6 +487,7 @@ class SessionService extends GetxService {
       await _pushCrops(
           owner, plot.code); // cultures déclarées avant l'envoi de la parcelle
     } on ApiException catch (e) {
+      debugPrint("[ERROR][SessionService._pushCrops] ${e}");
       lastSyncError.value = e.userMessage;
     }
   }

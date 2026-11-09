@@ -188,7 +188,8 @@ class SurveyController extends GetxController {
           perm == LocationPermission.deniedForever) {
         return _problem("Mbay Diaay n'a pas accès à la position du téléphone.");
       }
-    } catch (_) {
+    } catch (e) {
+      debugPrint("[ERROR][Survey.startGps] ${e}");
       return _problem('GPS indisponible sur ce téléphone.');
     }
     if (isClosed) return;
@@ -1248,7 +1249,8 @@ class _CameraViewState extends State<_CameraView> with WidgetsBindingObserver {
         return;
       }
       setState(() => _cam = cam);
-    } catch (_) {
+    } catch (e) {
+      debugPrint("[ERROR][Survey._CameraView._start] ${e}");
       // Pas de caméra (simulateur) ou accès refusé.
       if (mounted) widget.c.cameraUnavailable();
     } finally {
@@ -1812,7 +1814,8 @@ class _PointsSheetState extends State<_PointsSheet> {
     } on TimeoutException {
       showToast('Position introuvable. Réessayez à découvert.',
           icon: Symbols.location_searching_rounded);
-    } catch (_) {
+    } catch (e) {
+      debugPrint("[ERROR][Survey._locate] ${e}");
       showToast('Position indisponible sur ce téléphone.',
           icon: Symbols.location_off_rounded);
     } finally {

@@ -1,6 +1,7 @@
 import 'package:get/get.dart';
 
 import 'api_client.dart';
+import "package:flutter/foundation.dart";
 
 /// Étape OTP en attente, renvoyée par `POST /auth/sign-in`.
 class SignInChallenge {
@@ -109,7 +110,9 @@ class AuthService extends GetxService {
   Future<void> logout() async {
     try {
       await _client.post('/auth/logout');
-    } catch (_) {}
+    } catch (e) {
+      debugPrint("[ERROR][AuthService.logout] ${e}");
+    }
     await _client.clearTokens();
   }
 }

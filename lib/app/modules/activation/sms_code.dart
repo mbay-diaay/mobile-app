@@ -15,6 +15,7 @@ import '../../services/session_service.dart';
 import '../../widgets/animations.dart';
 import '../../widgets/buttons.dart';
 import '../../widgets/layout.dart';
+import "package:flutter/foundation.dart";
 
 /// 02 · Activation · code OTP reçu par e-mail (vérifié par l'API).
 class SmsCodeController extends GetxController {
@@ -60,6 +61,7 @@ class SmsCodeController extends GetxController {
       _startTimer(challenge.resendWaitSeconds);
       showToast('Nouveau code envoyé à $masked', icon: Symbols.mail_rounded);
     } on ApiException catch (e) {
+      debugPrint("[ERROR][SmsCode.resend] ${e}");
       showToast(e.userMessage, icon: Symbols.error_rounded);
     }
   }
@@ -82,6 +84,7 @@ class SmsCodeController extends GetxController {
       session.signIn(TestAccount.fromUser(me, scoop: me.scoopName ?? ''));
       Get.toNamed(Routes.pinCreate);
     } on ApiException catch (e) {
+      debugPrint("[ERROR][SmsCode.validate] ${e}");
       error.value = e.userMessage;
       shake.value++;
       text.clear();

@@ -11,6 +11,7 @@ import '../../services/auth_service.dart';
 import '../../widgets/animations.dart';
 import '../../widgets/buttons.dart';
 import '../../widgets/layout.dart';
+import "package:flutter/foundation.dart";
 
 /// 01 · Activation · e-mail et mot de passe (puis code OTP à l'étape 02).
 /// Forme d'adresse simple ; `GetUtils.isEmail` refuse les domaines de plus de 5 lettres (« .example »).
@@ -45,6 +46,7 @@ class PhoneController extends GetxController {
           .signIn(email: email.text, password: password.text);
       Get.toNamed(Routes.smsCode, arguments: challenge);
     } on ApiException catch (e) {
+      debugPrint("[ERROR][Phone.submit] ${e}");
       error.value = e.userMessage;
       shake.value++;
     }

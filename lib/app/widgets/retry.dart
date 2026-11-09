@@ -2,6 +2,7 @@ import 'package:material_symbols_icons/symbols.dart';
 
 import '../services/api_client.dart';
 import 'confirm_sheet.dart';
+import "package:flutter/foundation.dart";
 
 /// Lance [action] ; si le serveur ou le réseau échoue, affiche la raison avec « Réessayer ».
 /// Renvoie `true` quand l'action a réussi, `false` si l'utilisateur abandonne.
@@ -12,6 +13,7 @@ Future<bool> runWithRetry(Future<void> Function() action,
       await action();
       return true;
     } catch (e) {
+      debugPrint("[ERROR][runWithRetry] $e");
       final message =
           e is ApiException ? e.userMessage : 'Réponse inattendue du serveur.';
       final retry = await confirmSheet(
