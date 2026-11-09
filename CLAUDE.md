@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Mbay Diaay is a Flutter + GetX field-technician app built from the "Mbay Diaay Mobile v2" mockup (forest green, lemon accent, cream background, big numbers, very rounded cards, highly expressive animations). It is an **offline prototype**: no API calls, test accounts only, and everything created lives in memory until the app is closed. UI text, code comments and the README are in French; keep new ones in French.
+Mbay Diaay is a Flutter + GetX field-technician app built from the "Mbay Diaay Mobile v2" mockup (forest green, lemon accent, cream background, big numbers, very rounded cards, highly expressive animations). It is connected to the Mbay Diaay API (`https://api.mbaydiaay.com/v1`, override with `--dart-define=API_URL=…`) for **authentication and the producer directory (read-only)**; everything else (new/edited producers, plots, crops) is still local and lives in memory until the app is closed. UI text, code comments and the README are in French; keep new ones in French.
 
 ## Commands
 
@@ -31,8 +31,8 @@ Requires Flutter 3.27+ (Dart ≥ 3.6). There is no `test/` directory yet; if tes
 
 ## Test data (from README)
 
-- Phone: `77 123 45 67` (Ibrahima Diagne) or `78 111 22 33` (Awa Ndiaye); others are rejected.
-- SMS code: `482913` (any 6 digits accepted). PIN: the one chosen at activation, `1234` if skipped.
+- API (`lib/app/services/`): `api_client.dart` (Bearer header, tokens in `flutter_secure_storage`, auto refresh on 401, `ApiException` with French `userMessage`), `auth_service.dart` (sign-in → OTP verify with `challengeId`/`code` → `/me`), `producer_repository.dart` (`GET /producers` + `/scoops`, cached in `shared_preferences` for offline; the API only gives code/name/SCOOP/status/masked CNI). Login screens 01/02 are e-mail + password then e-mail OTP. Demo account: `aissatou.ndiaye@cradesc.example` / `Demonstration2026`, OTP `000000` (role admin). Producer edits/archives/creations and plots/crops are NOT sent (the API has no such routes yet).
+- PIN: the one chosen at activation, `1234` if skipped.
 - Crops of a plot (`modules/survey/crops.dart`): per-season working lists (`CropsController.plans`), saved to `SessionService.cropPlans` (plot code → season → `Crop`s) so reopening a plot restores them, and `plotsOf` derives each plot's displayed crops from it. Add from the embedded `CropCatalog` (`data/crop_catalog.dart`) or a free-text crop; tap a row to edit variety/share/change crop or delete; swipe to delete; each non-empty season must total 100 %. Fully offline.
 - Producer edit/archive (`modules/producer/producer_detail.dart`, "···" menu): edit reopens `NewProducerView` in edit mode (pass the `Producer` as `Get.arguments`; it returns the updated one, with a discard confirmation when dirty); archive asks `confirmSheet` (`widgets/confirm_sheet.dart`) then sets `Producer.archived` via `SessionService.archiveProducer`. Lists use `activeProducers`; archived ones are reached from the Producteurs tab "Archivées" chip and restored from their (read-only) detail. Producers are immutable: use `copyWith`, and `SessionService._replace` keeps `producers`/`recent` in sync (compare by `code`, not identity).
 - Duplicate flow: create "Aliou Ba" in Mboro.

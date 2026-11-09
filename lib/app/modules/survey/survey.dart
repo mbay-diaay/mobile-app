@@ -103,6 +103,14 @@ class SurveyController extends GetxController {
   double meters(Offset a, Offset b) =>
       geo.SphericalUtil.computeDistanceBetween(_geo(a), _geo(b)).toDouble();
 
+  /// Point central du contour (moyenne des angles), seul repère que l'API enregistre.
+  geo.LatLng? get _center {
+    if (points.isEmpty) return null;
+    final g = points.map(_geo).toList();
+    return geo.LatLng(g.fold(0.0, (a, p) => a + p.latitude) / g.length,
+        g.fold(0.0, (a, p) => a + p.longitude) / g.length);
+  }
+
   /// Surface en hectares, sur la sphère terrestre.
   double get area => points.length < 3
       ? 0
@@ -323,7 +331,8 @@ class SurveyController extends GetxController {
           'Cultures à déclarer',
           'Surface déclarée',
           AppColors.amberSoft,
-          AppColors.amberInk),
+          AppColors.amberInk,
+          areaHa: ha),
       ha,
     );
     final rect = [
@@ -355,7 +364,10 @@ class SurveyController extends GetxController {
           'Cultures à déclarer',
           'Relevée',
           AppColors.blueSoft,
-          AppColors.blueInk),
+          AppColors.blueInk,
+          areaHa: ha,
+          lat: _center?.latitude,
+          lng: _center?.longitude),
       ha,
     );
     Get.offNamed(Routes.surveyDone, arguments: {

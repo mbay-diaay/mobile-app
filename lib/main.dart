@@ -8,7 +8,7 @@ import 'app/routes/app_routes.dart';
 import 'app/services/api_client.dart';
 import 'app/services/auth_service.dart';
 import 'app/services/network_service.dart';
-import 'app/services/producers_service.dart';
+import 'app/services/producer_repository.dart';
 import 'app/services/session_service.dart';
 
 Future<void> main() async {
@@ -17,9 +17,16 @@ Future<void> main() async {
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   Get.put(NetworkService(), permanent: true);
   await Get.putAsync(() => SessionService().init(), permanent: true);
-  Get.put(ApiClient(), permanent: true);
+  await Get.putAsync(() => ApiClient().init(), permanent: true);
   Get.put(AuthService(), permanent: true);
-  Get.put(ProducersService(), permanent: true);
+  Get.put(ProducerRepository(), permanent: true);
+  final session = Get.find<SessionService>();
+  // Session refusée par l'API (jeton révoqué ou expiré) : retour à la connexion.
+  Get.find<ApiClient>().onSessionExpired = () {
+    session.revoke();
+    Get.offAllNamed(Routes.phone);
+  };
+  if (session.activated.value) await session.restoreProducers();
   runApp(const MbayDiaayApp());
 }
 

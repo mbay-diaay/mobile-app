@@ -9,27 +9,32 @@ import '../../core/app_colors.dart';
 import '../../core/app_text.dart';
 import '../../core/app_theme.dart';
 import '../../routes/app_routes.dart';
+import '../../services/api_client.dart';
+import '../../services/auth_service.dart';
 import '../../services/session_service.dart';
 import '../../widgets/animations.dart';
 import '../../widgets/buttons.dart';
 import '../../widgets/layout.dart';
 
-/// 02 · Activation · code SMS. Prototype : tout code à 6 chiffres est accepté.
+/// 02 · Activation · code OTP reçu par e-mail (vérifié par l'API).
 class SmsCodeController extends GetxController {
   final text = TextEditingController();
   final focus = FocusNode();
   final code = ''.obs;
   final resendIn = 30.obs;
-  final verifying = false.obs;
+  final error = RxnString();
+  final shake = 0.obs;
   Timer? _timer;
 
-  late final String phone = (Get.arguments as String?) ?? '771234567';
-  String get masked => '+221 •• ••• •• ${phone.substring(phone.length - 2)}';
+  late SignInChallenge challenge = (Get.arguments is SignInChallenge)
+      ? Get.arguments as SignInChallenge
+      : const SignInChallenge(id: '', maskedEmail: '', resendAvailableAt: 0);
+  String get masked => challenge.maskedEmail;
 
   @override
   void onInit() {
     super.onInit();
-    _startTimer();
+    _startTimer(challenge.resendWaitSeconds);
   }
 
   @override
@@ -38,36 +43,51 @@ class SmsCodeController extends GetxController {
     Future.delayed(const Duration(milliseconds: 600), focus.requestFocus);
   }
 
-  void _startTimer() {
+  void _startTimer(int seconds) {
     _timer?.cancel();
-    resendIn.value = 30;
+    resendIn.value = seconds;
+    if (seconds <= 0) return;
     _timer = Timer.periodic(const Duration(seconds: 1), (t) {
       if (resendIn.value <= 1) t.cancel();
       resendIn.value--;
     });
   }
 
-  void resend() {
+  Future<void> resend() async {
     if (resendIn.value > 0) return;
-    _startTimer();
-    showToast(
-        'Nouveau code envoyé au $masked · test : ${SessionService.testSmsCode}',
-        icon: Symbols.sms_rounded);
+    try {
+      challenge = await Get.find<AuthService>().resendOtp(challenge);
+      _startTimer(challenge.resendWaitSeconds);
+      showToast('Nouveau code envoyé à $masked', icon: Symbols.mail_rounded);
+    } on ApiException catch (e) {
+      showToast(e.userMessage, icon: Symbols.error_rounded);
+    }
   }
 
   void onChanged(String v) {
     code.value = v;
+    error.value = null;
     // Code complet : on range le clavier pour dévoiler le CTA à glisser.
     if (v.length == 6) focus.unfocus();
   }
 
   Future<void> validate() async {
-    if (code.value.length != 6 || verifying.value) return;
+    if (code.value.length != 6) return;
     focus.unfocus();
-    verifying.value = true;
-    await Future.delayed(const Duration(milliseconds: 800));
-    verifying.value = false;
-    Get.toNamed(Routes.pinCreate);
+    try {
+      final auth = Get.find<AuthService>();
+      await auth.verifyOtp(challengeId: challenge.id, code: code.value);
+      final me = await auth.me();
+      final session = Get.find<SessionService>();
+      session.signIn(TestAccount.fromUser(me, scoop: me.scoopName ?? ''));
+      Get.toNamed(Routes.pinCreate);
+    } on ApiException catch (e) {
+      error.value = e.userMessage;
+      shake.value++;
+      text.clear();
+      code.value = '';
+      focus.requestFocus();
+    }
   }
 
   @override
@@ -108,7 +128,7 @@ class SmsCodeView extends GetView<SmsCodeController> {
                     const SizedBox(height: 20),
                     FadeSlideIn(
                       delay: const Duration(milliseconds: 120),
-                      child: Text('Code reçu par SMS',
+                      child: Text('Code de vérification',
                           style: display(30, color: Colors.white)),
                     ),
                     const SizedBox(height: 8),
@@ -117,7 +137,7 @@ class SmsCodeView extends GetView<SmsCodeController> {
                       child: Text.rich(TextSpan(
                         style: jakarta(13, color: AppColors.white(.7)),
                         children: [
-                          const TextSpan(text: 'Envoyé au '),
+                          const TextSpan(text: 'Envoyé à '),
                           TextSpan(
                               text: controller.masked,
                               style: jakarta(13,
@@ -136,7 +156,20 @@ class SmsCodeView extends GetView<SmsCodeController> {
                 child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      _CodeBoxes(controller: controller),
+                      Obx(() => Shake(
+                          trigger: controller.shake.value,
+                          child: _CodeBoxes(controller: controller))),
+                      Obx(() {
+                        final msg = controller.error.value;
+                        if (msg == null) return const SizedBox.shrink();
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 12),
+                          child: Text(msg,
+                              style: jakarta(13,
+                                  weight: FontWeight.w700,
+                                  color: AppColors.redInk)),
+                        );
+                      }),
                       const SizedBox(height: 16),
                       Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -166,19 +199,6 @@ class SmsCodeView extends GetView<SmsCodeController> {
                               );
                             }),
                           ]),
-                      const SizedBox(height: 16),
-                      CustomPaint(
-                        painter: DashedBorderPainter(
-                            color: AppColors.faint, width: 1.5),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 12),
-                          child: Text(
-                            'Prototype : code de test ${SessionService.testSmsCode} (tout code à 6 chiffres est accepté).',
-                            style: jakarta(12, color: AppColors.muted),
-                          ),
-                        ),
-                      ),
                       const Spacer(),
                       const SizedBox(height: 16),
                       Obx(() => SwipeCta.dark(

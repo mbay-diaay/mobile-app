@@ -24,6 +24,13 @@ class ShellController extends GetxController {
   final tab = 0.obs;
   int _previous = 0;
 
+  @override
+  void onReady() {
+    super.onReady();
+    // Actualise l'annuaire depuis l'API ; hors ligne, le cache local reste affiché.
+    Get.find<SessionService>().refreshProducers();
+  }
+
   /// +1 si on va vers la droite : sert à orienter le glissé entre onglets.
   int get direction => tab.value >= _previous ? 1 : -1;
 

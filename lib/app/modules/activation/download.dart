@@ -29,6 +29,7 @@ class DownloadController extends GetxController
   @override
   void onReady() {
     super.onReady();
+    Get.find<SessionService>().refreshProducers();
     Future.delayed(const Duration(milliseconds: 500), progress.forward);
   }
 

@@ -18,6 +18,7 @@ class Producer {
     this.registeredAgo = Duration.zero,
     this.createdAt,
     this.archived = false,
+    this.remoteId,
   });
 
   final String initials;
@@ -42,6 +43,9 @@ class Producer {
   /// Fiche archivée : masquée des listes, restaurable.
   final bool archived;
 
+  /// Identifiant côté API (null tant que la fiche n'a pas été envoyée).
+  final String? remoteId;
+
   Producer copyWith({
     String? initials,
     String? name,
@@ -51,6 +55,10 @@ class Producer {
     String? sex,
     String? org,
     bool? archived,
+    String? code,
+    bool? isNew,
+    String? remoteId,
+    DateTime? createdAt,
   }) =>
       Producer(
         initials: initials ?? this.initials,
@@ -58,14 +66,15 @@ class Producer {
         village: village ?? this.village,
         age: age ?? this.age,
         tint: tint,
-        code: code,
+        code: code ?? this.code,
         phone: phone ?? this.phone,
         sex: sex ?? this.sex,
         org: org ?? this.org,
-        isNew: isNew,
+        isNew: isNew ?? this.isNew,
         registeredAgo: registeredAgo,
-        createdAt: createdAt,
+        createdAt: createdAt ?? this.createdAt,
         archived: archived ?? this.archived,
+        remoteId: remoteId ?? this.remoteId,
       );
 
   /// Date d'enregistrement de la fiche.
@@ -105,13 +114,26 @@ class PendingItem {
 
 class Plot {
   const Plot(this.code, this.area, this.crops, this.status, this.statusBg,
-      this.statusInk);
+      this.statusInk,
+      {this.remoteId, this.areaHa = 0, this.lat, this.lng});
   final String code;
   final String area;
   final String crops;
   final String status;
   final Color statusBg;
   final Color statusInk;
+
+  /// Identifiant côté API (null tant que la parcelle n'est pas envoyée).
+  final String? remoteId;
+
+  /// Surface en hectares et point central (l'API ne garde pas le contour).
+  final double areaHa;
+  final double? lat;
+  final double? lng;
+
+  Plot withRemoteId(String id) =>
+      Plot(code, area, crops, status, statusBg, statusInk,
+          remoteId: id, areaHa: areaHa, lat: lat, lng: lng);
 }
 
 class Crop {
@@ -127,7 +149,11 @@ class Crop {
   /// Part de la parcelle, en %.
   int share;
 
-  Crop copy() => Crop(short, name, variety, tint, ink, bar, share);
+  /// Identifiant côté API (null tant que la culture n'est pas envoyée).
+  String? remoteId;
+
+  Crop copy() =>
+      Crop(short, name, variety, tint, ink, bar, share)..remoteId = remoteId;
 }
 
 abstract final class MockData {

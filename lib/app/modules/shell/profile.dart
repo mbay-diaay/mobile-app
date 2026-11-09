@@ -59,11 +59,10 @@ class ProfileTab extends StatelessWidget {
                       weight: FontWeight.w800,
                       color: Colors.white,
                       tracking: -.02)),
-              Text('Technicien · ${s.scoop}',
+              Text(s.scoop.isEmpty ? 'Technicien' : 'Technicien · ${s.scoop}',
                   style: jakarta(11, color: AppColors.white(.7))),
               const SizedBox(height: 2),
-              Text(
-                  '+221 ${s.account.value.phone.substring(0, 2)} ••• •• ${s.account.value.phone.substring(7)}',
+              Text(s.account.value.email,
                   style: mono(10, color: AppColors.white(.55))),
             ]),
           ),

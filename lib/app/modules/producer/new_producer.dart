@@ -286,13 +286,16 @@ class NewProducerView extends GetView<NewProducerController> {
 
     final c = controller;
     // En modification, le retour système (ou le geste) demande aussi confirmation.
-    return Obx(() => PopScope(
-          canPop: !(c.isEdit && c.dirty.value),
-          onPopInvokedWithResult: (didPop, _) {
-            if (!didPop) c.close();
-          },
-          child: _scaffold(net, item),
-        ));
+    return Obx(() {
+      final isDirty = c.dirty.value;
+      return PopScope(
+        canPop: !(c.isEdit && isDirty),
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) c.close();
+        },
+        child: _scaffold(net, item),
+      );
+    });
   }
 
   Widget _scaffold(NetworkService net, Widget Function(Widget) item) {

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
@@ -7,49 +6,56 @@ import '../../core/app_colors.dart';
 import '../../core/app_text.dart';
 import '../../core/app_theme.dart';
 import '../../routes/app_routes.dart';
-import '../../services/session_service.dart';
+import '../../services/api_client.dart';
+import '../../services/auth_service.dart';
 import '../../widgets/animations.dart';
 import '../../widgets/buttons.dart';
 import '../../widgets/layout.dart';
-import '../../widgets/senegal_flag.dart';
 
-/// 01 · Activation · téléphone
+/// 01 · Activation · e-mail et mot de passe (puis code OTP à l'étape 02).
+/// Forme d'adresse simple ; `GetUtils.isEmail` refuse les domaines de plus de 5 lettres (« .example »).
+final _emailRe = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]{2,}$');
+
 class PhoneController extends GetxController {
-  final text = TextEditingController(text: '77 123 45 67');
-  final focus = FocusNode();
-  final digits = '771234567'.obs;
-  final sending = false.obs;
-  final unknown = false.obs;
+  final email = TextEditingController();
+  final password = TextEditingController();
+  final emailFocus = FocusNode();
+  final passFocus = FocusNode();
+  final hidden = true.obs;
+  final emailText = ''.obs;
+  final passText = ''.obs;
+  final error = RxnString();
   final shake = 0.obs;
 
-  bool get valid => digits.value.length == 9;
+  bool get valid =>
+      _emailRe.hasMatch(emailText.value.trim()) && passText.value.length >= 8;
 
-  void onChanged(String v) {
-    digits.value = v.replaceAll(' ', '');
-    unknown.value = false;
+  void onChanged() {
+    emailText.value = email.text;
+    passText.value = password.text;
+    error.value = null;
   }
 
   Future<void> submit() async {
-    if (!valid || sending.value) return;
-    focus.unfocus();
-    sending.value = true;
-    await Future.delayed(const Duration(milliseconds: 700));
-    sending.value = false;
-    // Connexion simulée : seuls les numéros de test sont reconnus.
-    final account = Get.find<SessionService>().findAccount(digits.value);
-    if (account == null) {
-      unknown.value = true;
+    if (!valid) return;
+    emailFocus.unfocus();
+    passFocus.unfocus();
+    try {
+      final challenge = await Get.find<AuthService>()
+          .signIn(email: email.text, password: password.text);
+      Get.toNamed(Routes.smsCode, arguments: challenge);
+    } on ApiException catch (e) {
+      error.value = e.userMessage;
       shake.value++;
-      return;
     }
-    Get.find<SessionService>().signIn(account);
-    Get.toNamed(Routes.smsCode, arguments: digits.value);
   }
 
   @override
   void onClose() {
-    text.dispose();
-    focus.dispose();
+    email.dispose();
+    password.dispose();
+    emailFocus.dispose();
+    passFocus.dispose();
     super.onClose();
   }
 }
@@ -82,13 +88,13 @@ class PhoneView extends GetView<PhoneController> {
                       scale: .4,
                       curve: Curves.elasticOut,
                       duration: Duration(milliseconds: 1100),
-                      child: IconTile(Symbols.smartphone_rounded,
+                      child: IconTile(Symbols.mail_rounded,
                           size: 56, radius: 18, iconSize: 30, fill: true),
                     ),
                     const SizedBox(height: 20),
                     FadeSlideIn(
                       delay: const Duration(milliseconds: 180),
-                      child: Text('Votre numéro de téléphone',
+                      child: Text('Connexion à votre compte',
                           style: display(30, color: Colors.white)),
                     ),
                     const SizedBox(height: 8),
@@ -108,20 +114,46 @@ class PhoneView extends GetView<PhoneController> {
                 child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Text('NUMÉRO',
-                          style: jakarta(11,
-                              weight: FontWeight.w700,
-                              tracking: .06,
-                              color: AppColors.muted)),
-                      const SizedBox(height: 14),
+                      const _FieldLabel('E-MAIL'),
+                      const SizedBox(height: 10),
                       Obx(() => Shake(
                           trigger: controller.shake.value,
-                          child: _PhoneField(controller: controller))),
+                          child: _Field(
+                            controller: controller.email,
+                            focus: controller.emailFocus,
+                            hint: 'prenom.nom@cradesc.example',
+                            icon: Symbols.alternate_email_rounded,
+                            keyboard: TextInputType.emailAddress,
+                            onChanged: controller.onChanged,
+                            onSubmitted: controller.passFocus.requestFocus,
+                          ))),
+                      const SizedBox(height: 16),
+                      const _FieldLabel('MOT DE PASSE'),
+                      const SizedBox(height: 10),
+                      Obx(() => _Field(
+                            controller: controller.password,
+                            focus: controller.passFocus,
+                            hint: '8 caractères minimum',
+                            icon: Symbols.lock_rounded,
+                            obscure: controller.hidden.value,
+                            onChanged: controller.onChanged,
+                            onSubmitted: controller.submit,
+                            trailing: GestureDetector(
+                              onTap: controller.hidden.toggle,
+                              child: Sym(
+                                  controller.hidden.value
+                                      ? Symbols.visibility_rounded
+                                      : Symbols.visibility_off_rounded,
+                                  size: 22,
+                                  color: AppColors.muted),
+                            ),
+                          )),
                       const SizedBox(height: 14),
                       FadeSlideIn(
                         delay: const Duration(milliseconds: 500),
                         child: Obx(() {
-                          final bad = controller.unknown.value;
+                          final msg = controller.error.value;
+                          final bad = msg != null;
                           return AnimatedContainer(
                             duration: Motion.medium,
                             padding: const EdgeInsets.symmetric(
@@ -133,7 +165,7 @@ class PhoneView extends GetView<PhoneController> {
                               Sym(
                                   bad
                                       ? Symbols.error_rounded
-                                      : Symbols.sms_rounded,
+                                      : Symbols.mark_email_read_rounded,
                                   size: 20,
                                   color: bad
                                       ? AppColors.redInk
@@ -141,9 +173,8 @@ class PhoneView extends GetView<PhoneController> {
                               const SizedBox(width: 10),
                               Expanded(
                                 child: Text(
-                                  bad
-                                      ? "Ce numéro n'est pas enregistré pour votre SCOOP."
-                                      : 'Un code arrive par SMS.',
+                                  msg ??
+                                      'Un code de vérification arrive par e-mail.',
                                   style: jakarta(13,
                                       color: bad
                                           ? AppColors.redInk
@@ -156,21 +187,6 @@ class PhoneView extends GetView<PhoneController> {
                             ]),
                           );
                         }),
-                      ),
-                      const SizedBox(height: 10),
-                      CustomPaint(
-                        painter: DashedBorderPainter(
-                            color: AppColors.faint, width: 1.5),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 10),
-                          child: Text(
-                            'Prototype · numéros de test : '
-                            '${SessionService.testAccounts.map((a) => '${a.phone.substring(0, 2)} ${a.phone.substring(2, 5)} ${a.phone.substring(5, 7)} ${a.phone.substring(7)} (${a.name})').join(' · ')}',
-                            style: jakarta(11,
-                                color: AppColors.muted, height: 1.4),
-                          ),
-                        ),
                       ),
                       const Spacer(),
                       const SizedBox(height: 16),
@@ -193,23 +209,53 @@ class PhoneView extends GetView<PhoneController> {
   }
 }
 
-class _PhoneField extends StatelessWidget {
-  const _PhoneField({required this.controller});
-  final PhoneController controller;
+class _FieldLabel extends StatelessWidget {
+  const _FieldLabel(this.text);
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Text(text,
+      style: jakarta(11,
+          weight: FontWeight.w700, tracking: .06, color: AppColors.muted));
+}
+
+/// Champ de saisie arrondi, bordure verte et halo citron au focus.
+class _Field extends StatelessWidget {
+  const _Field({
+    required this.controller,
+    required this.focus,
+    required this.hint,
+    required this.icon,
+    required this.onChanged,
+    required this.onSubmitted,
+    this.keyboard,
+    this.obscure = false,
+    this.trailing,
+  });
+
+  final TextEditingController controller;
+  final FocusNode focus;
+  final String hint;
+  final IconData icon;
+  final VoidCallback onChanged;
+  final VoidCallback onSubmitted;
+  final TextInputType? keyboard;
+  final bool obscure;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: controller.focus,
+      listenable: focus,
       builder: (_, __) => AnimatedContainer(
         duration: Motion.medium,
-        height: 64,
-        padding: const EdgeInsets.symmetric(horizontal: 8),
+        height: 60,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(color: AppColors.forest, width: 2),
-          boxShadow: controller.focus.hasFocus
+          boxShadow: focus.hasFocus
               ? [
                   BoxShadow(
                       color: AppColors.lime.withValues(alpha: .7),
@@ -218,59 +264,33 @@ class _PhoneField extends StatelessWidget {
               : const [],
         ),
         child: Row(children: [
-          Container(
-            height: 46,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(
-                color: AppColors.sage, borderRadius: BorderRadius.circular(14)),
-            child: Row(children: [
-              const SenegalFlag(),
-              const SizedBox(width: 6),
-              Text('+221', style: jakarta(15, weight: FontWeight.w700)),
-            ]),
-          ),
-          const SizedBox(width: 10),
+          Sym(icon, size: 22, color: AppColors.forest),
+          const SizedBox(width: 12),
           Expanded(
             child: TextField(
-              controller: controller.text,
-              focusNode: controller.focus,
-              keyboardType: TextInputType.phone,
-              onChanged: controller.onChanged,
-              onSubmitted: (_) => controller.submit(),
-              inputFormatters: [
-                FilteringTextInputFormatter.digitsOnly,
-                LengthLimitingTextInputFormatter(9),
-                _SnPhoneFormatter()
-              ],
-              style: jakarta(21, weight: FontWeight.w700, tracking: .02),
+              controller: controller,
+              focusNode: focus,
+              keyboardType: keyboard,
+              obscureText: obscure,
+              autocorrect: false,
+              enableSuggestions: false,
+              textInputAction:
+                  obscure ? TextInputAction.done : TextInputAction.next,
+              onChanged: (_) => onChanged(),
+              onSubmitted: (_) => onSubmitted(),
+              style: jakarta(16, weight: FontWeight.w700),
               decoration: InputDecoration(
                 border: InputBorder.none,
                 isCollapsed: true,
-                hintText: '77 123 45 67',
-                hintStyle: jakarta(21,
-                    weight: FontWeight.w700, color: AppColors.faint),
+                hintText: hint,
+                hintStyle: jakarta(15,
+                    weight: FontWeight.w600, color: AppColors.faint),
               ),
             ),
           ),
+          if (trailing != null) ...[const SizedBox(width: 8), trailing!],
         ]),
       ),
     );
-  }
-}
-
-/// « 771234567 » → « 77 123 45 67 ».
-class _SnPhoneFormatter extends TextInputFormatter {
-  @override
-  TextEditingValue formatEditUpdate(
-      TextEditingValue oldValue, TextEditingValue newValue) {
-    final d = newValue.text.replaceAll(' ', '');
-    final b = StringBuffer();
-    for (var i = 0; i < d.length; i++) {
-      if (i == 2 || i == 5 || i == 7) b.write(' ');
-      b.write(d[i]);
-    }
-    final s = b.toString();
-    return TextEditingValue(
-        text: s, selection: TextSelection.collapsed(offset: s.length));
   }
 }

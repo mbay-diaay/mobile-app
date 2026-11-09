@@ -5,16 +5,31 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/crop_catalog.dart';
 import '../data/mock_data.dart';
+import 'auth_service.dart';
+import 'api_client.dart';
+import 'producer_repository.dart';
 
-/// Compte de test accepté à l'activation (connexion simulée, sans serveur).
+/// Technicien connecté (profil renvoyé par l'API).
 class TestAccount {
   const TestAccount(
-      this.phone, this.name, this.fullName, this.initials, this.scoop);
-  final String phone;
+      this.email, this.name, this.fullName, this.initials, this.scoop);
+  final String email;
   final String name;
   final String fullName;
   final String initials;
   final String scoop;
+
+  /// Construit l'affichage (prénom, initiales) à partir du nom complet de l'API.
+  factory TestAccount.fromUser(AuthUser u, {String scoop = ''}) {
+    final parts =
+        u.name.trim().split(RegExp(r'\s+')).where((e) => e.isNotEmpty).toList();
+    final first = parts.isEmpty ? u.email : parts.first;
+    final initials = parts.length >= 2
+        ? '${parts.first[0]}${parts.last[0]}'
+        : (first.isEmpty ? '?' : first[0]);
+    return TestAccount(u.email, first, u.name.isEmpty ? u.email : u.name,
+        initials.toUpperCase(), scoop);
+  }
 }
 
 /// État partagé du prototype. Tout ce qui est créé (fiches, parcelles,
@@ -25,16 +40,8 @@ class SessionService extends GetxService {
   static const defaultPin = '1234';
   static const maxAttempts = 3;
 
-  /// Code SMS de test affiché à l'écran 02 (tout code à 6 chiffres reste accepté).
-  static const testSmsCode = '482913';
-
-  static const testAccounts = [
-    TestAccount(
-        '771234567', 'Ibrahima', 'Ibrahima Diagne', 'ID', 'And Liggey Mboro'),
-    TestAccount('781112233', 'Awa', 'Awa Ndiaye', 'AN', 'Jappo Diogo'),
-  ];
-
-  final account = testAccounts.first.obs;
+  final account =
+      const TestAccount('', 'Technicien', 'Technicien', 'T', '').obs;
   String get technician => account.value.name;
   String get technicianFull => account.value.fullName;
   String get initials => account.value.initials;
@@ -47,7 +54,9 @@ class SessionService extends GetxService {
   final activated = false.obs;
 
   static const _kActivated = 'activated';
-  static const _kPhone = 'account_phone';
+  static const _kEmail = 'account_email';
+  static const _kName = 'account_name';
+  static const _kScoop = 'account_scoop';
   static const _kPin = 'pin';
   late final SharedPreferences _prefs;
 
@@ -55,10 +64,17 @@ class SessionService extends GetxService {
   Future<SessionService> init() async {
     _prefs = await SharedPreferences.getInstance();
     activated.value = _prefs.getBool(_kActivated) ?? false;
-    final saved = findAccount(_prefs.getString(_kPhone) ?? '');
-    if (saved != null) account.value = saved;
+    final email = _prefs.getString(_kEmail);
+    if (email != null) {
+      account.value = TestAccount.fromUser(
+          AuthUser(
+              id: '',
+              email: email,
+              name: _prefs.getString(_kName) ?? '',
+              role: ''),
+          scoop: _prefs.getString(_kScoop) ?? '');
+    }
     pin.value = _prefs.getString(_kPin) ?? defaultPin;
-    ever(account, (a) => _prefs.setString(_kPhone, a.phone));
     ever(pin, (p) => _prefs.setString(_kPin, p));
     return this;
   }
@@ -68,18 +84,26 @@ class SessionService extends GetxService {
     activated.value = true;
     _prefs
       ..setBool(_kActivated, true)
-      ..setString(_kPhone, account.value.phone)
+      ..setString(_kEmail, account.value.email)
+      ..setString(_kName, account.value.fullName)
+      ..setString(_kScoop, account.value.scoop)
       ..setString(_kPin, pin.value);
   }
 
   /// Révocation (écran 25) : le prochain démarrage repasse par l'activation.
   void revoke() {
+    if (Get.isRegistered<AuthService>()) Get.find<AuthService>().logout();
+    if (Get.isRegistered<ProducerRepository>()) {
+      Get.find<ProducerRepository>().clearCache();
+    }
     activated.value = false;
     failedAttempts.value = 0;
     pin.value = defaultPin;
     _prefs
       ..remove(_kActivated)
-      ..remove(_kPhone)
+      ..remove(_kEmail)
+      ..remove(_kName)
+      ..remove(_kScoop)
       ..remove(_kPin);
   }
 
@@ -111,11 +135,39 @@ class SessionService extends GetxService {
   int _nextProducer = 20;
   int _nextPlot = 35;
 
-  /// Connexion simulée : renvoie le compte de test correspondant, ou null.
-  TestAccount? findAccount(String phone) =>
-      testAccounts.firstWhereOrNull((a) => a.phone == phone);
-
   void signIn(TestAccount a) => account.value = a;
+
+  /// Annuaire du cache local (instantané, fonctionne hors ligne).
+  Future<void> restoreProducers() async {
+    applyServerProducers(await Get.find<ProducerRepository>().cached());
+  }
+
+  /// Annuaire de l'API ; en cas d'échec (hors ligne…), on garde ce qui est déjà affiché.
+  /// Renvoie null si tout va bien, sinon l'erreur.
+  Future<ApiException?> refreshProducers() async {
+    try {
+      applyServerProducers(await Get.find<ProducerRepository>().fetch());
+      return null;
+    } on ApiException catch (e) {
+      return e;
+    }
+  }
+
+  /// Remplace l'annuaire de démonstration par celui de l'API ; les fiches créées sur
+  /// cet appareil (pas encore envoyées) restent en tête.
+  void applyServerProducers(List<Producer> server) {
+    if (server.isEmpty) return;
+    final local = producers.where((p) => p.isNew).toList();
+    final archived = {
+      for (final p in producers.where((p) => p.archived)) p.code
+    };
+    producers.assignAll([
+      ...local,
+      for (final p in server)
+        archived.contains(p.code) ? p.copyWith(archived: true) : p,
+    ]);
+    recent.assignAll(producers.where((p) => !p.archived).take(3));
+  }
 
   bool checkPin(String value) {
     if (value == pin.value) {
@@ -164,6 +216,7 @@ class SessionService extends GetxService {
     createdToday.value++;
     pending.add(
         PendingItem(Symbols.person_add_rounded, 'Nouvelle fiche · ${p.name}'));
+    _pushCreate(p, first, last);
     if (cniPhotos)
       pending.add(
           PendingItem(Symbols.badge_rounded, 'CNI recto + verso · ${p.name}'));
@@ -210,8 +263,63 @@ class SessionService extends GetxService {
     );
     _replace(old, updated);
     _queue(Symbols.edit_rounded, 'Modification · ${updated.name}');
+    _pushUpdate(updated, first, last, phone);
     return updated;
   }
+
+  /// Envoie la nouvelle fiche à l'API. Hors ligne ou refusée : elle reste « en attente d'envoi ».
+  Future<void> _pushCreate(Producer p, String first, String last) async {
+    try {
+      final data = await Get.find<ApiClient>().post('/producers', body: {
+        'firstName': first,
+        'lastName': last.isEmpty ? first : last,
+        if (ProducerRepository.apiPhone(p.phone == '—' ? null : p.phone) !=
+            null)
+          'phone': ProducerRepository.apiPhone(p.phone),
+        if (p.village.isNotEmpty) 'village': p.village,
+      }) as Map<String, dynamic>;
+      final sent = p.copyWith(
+          code: (data['code'] ?? p.code).toString(),
+          remoteId: data['id']?.toString(),
+          isNew: false);
+      _replace(p, sent);
+      pending.removeWhere((x) =>
+          x.label.endsWith('· ${p.name}') &&
+          (x.label.startsWith('Nouvelle fiche')));
+      // Le code vient de l'API : les parcelles suivent la fiche, puis partent à leur tour.
+      if (sent.code != p.code && plots.containsKey(p.code)) {
+        plots[sent.code] = plots.remove(p.code)!;
+      }
+      for (final pl in List<Plot>.of(plots[sent.code] ?? const <Plot>[])) {
+        await _pushPlot(sent, pl);
+      }
+    } on ApiException catch (e) {
+      lastSyncError.value = e.userMessage;
+    }
+  }
+
+  /// Envoie la modification (fiche déjà connue de l'API).
+  Future<void> _pushUpdate(
+      Producer p, String first, String last, String? phone) async {
+    final id = p.remoteId;
+    if (id == null)
+      return; // pas encore envoyée : l'envoi initial portera les valeurs à jour
+    try {
+      await Get.find<ApiClient>().patch('/producers/$id', body: {
+        'firstName': first,
+        if (last.isNotEmpty) 'lastName': last,
+        'village': p.village,
+        if (ProducerRepository.apiPhone(phone) != null)
+          'phone': ProducerRepository.apiPhone(phone),
+      });
+      pending.removeWhere((x) => x.label == 'Modification · ${p.name}');
+    } on ApiException catch (e) {
+      lastSyncError.value = e.userMessage;
+    }
+  }
+
+  /// Dernière erreur d'envoi à l'API (null si tout est parti).
+  final lastSyncError = RxnString();
 
   /// Archive la fiche : elle quitte les listes, mais ses parcelles et cultures sont conservées.
   Producer archiveProducer(Producer p) {
@@ -245,7 +353,8 @@ class SessionService extends GetxService {
     };
     if (names.isEmpty) return pl;
     return Plot(pl.code, pl.area, names.join(', '), pl.status, pl.statusBg,
-        pl.statusInk);
+        pl.statusInk,
+        remoteId: pl.remoteId, areaHa: pl.areaHa, lat: pl.lat, lng: pl.lng);
   }
 
   /// Copie de travail des cultures d'une parcelle pour une saison.
@@ -260,10 +369,44 @@ class SessionService extends GetxService {
     surveyedToday.value++;
     pending.add(PendingItem(
         Symbols.pentagon_rounded, 'Parcelle relevée · ${plot.code}'));
+    _pushPlot(owner, plot);
+  }
+
+  /// Envoie la parcelle : un nom, la surface en hectares et le point central.
+  /// Le contour complet reste sur le téléphone (l'API ne garde qu'un point).
+  /// Sans fiche déjà envoyée, ou hors ligne, la parcelle reste en attente.
+  Future<void> _pushPlot(Producer owner, Plot plot) async {
+    final pid = owner.remoteId;
+    if (pid == null || plot.remoteId != null) return;
+    try {
+      final data =
+          await Get.find<ApiClient>().post('/producers/$pid/plots', body: {
+        'name': 'Parcelle ${plot.code}',
+        'areaHa': double.parse(plot.areaHa.toStringAsFixed(4)),
+        if (owner.village.isNotEmpty) 'village': owner.village,
+        if (plot.lat != null) 'lat': plot.lat,
+        if (plot.lng != null) 'lng': plot.lng,
+      }) as Map<String, dynamic>;
+      final list = plots[owner.code] ?? const <Plot>[];
+      final i = list.indexWhere((x) => x.code == plot.code);
+      if (i >= 0) {
+        plots[owner.code] = [...list]..[i] =
+            list[i].withRemoteId(data['id'].toString());
+      }
+      pending.removeWhere((x) => x.label == 'Parcelle relevée · ${plot.code}');
+      await _pushCrops(
+          owner, plot.code); // cultures déclarées avant l'envoi de la parcelle
+    } on ApiException catch (e) {
+      lastSyncError.value = e.userMessage;
+    }
   }
 
   /// Enregistre les cultures de la parcelle (une liste par saison, les vides sont ignorées).
-  void declareCrops(String plotCode, Map<int, List<Crop>> perSeason) {
+  void declareCrops(
+      Producer owner, String plotCode, Map<int, List<Crop>> perSeason) {
+    final before = [
+      for (final l in cropPlans[plotCode]?.values ?? const <List<Crop>>[]) ...l
+    ];
     cropPlans[plotCode] = {
       for (final e in perSeason.entries)
         if (e.value.isNotEmpty) e.key: [for (final c in e.value) c.copy()],
@@ -272,6 +415,52 @@ class SessionService extends GetxService {
     final label = 'Cultures · $plotCode';
     if (!pending.any((x) => x.label == label))
       pending.add(PendingItem(Symbols.potted_plant_rounded, label));
+    _pushCrops(owner, plotCode, removed: before);
+  }
+
+  static const _seasonLabels = ['Horticole 2026', 'Contre-saison 2026'];
+
+  /// Synchronise les cultures d'une parcelle : crée les nouvelles, met à jour les
+  /// existantes, supprime les retirées. La part en % reste locale (pas de champ côté API).
+  Future<void> _pushCrops(Producer owner, String plotCode,
+      {List<Crop> removed = const []}) async {
+    final pid = owner.remoteId;
+    final plot = plots[owner.code]?.firstWhereOrNull((x) => x.code == plotCode);
+    final plotId = plot?.remoteId;
+    if (pid == null || plotId == null)
+      return; // en attente de l'envoi de la fiche / parcelle
+    final api = Get.find<ApiClient>();
+    final keep = {
+      for (final l in cropPlans[plotCode]?.values ?? const <List<Crop>>[])
+        for (final c in l) c.remoteId
+    };
+    try {
+      for (final c in removed) {
+        if (c.remoteId != null && !keep.contains(c.remoteId)) {
+          await api.request('DELETE', '/producers/$pid/crops/${c.remoteId}');
+        }
+      }
+      final plan = cropPlans[plotCode] ?? const <int, List<Crop>>{};
+      for (final e in plan.entries) {
+        for (final c in e.value) {
+          final body = {
+            'name': c.name,
+            if (c.variety.isNotEmpty) 'variety': c.variety,
+            'season': _seasonLabels[e.key],
+          };
+          if (c.remoteId == null) {
+            final data = await api.post('/producers/$pid/crops',
+                body: {...body, 'plotId': plotId}) as Map<String, dynamic>;
+            c.remoteId = data['id'].toString();
+          } else {
+            await api.patch('/producers/$pid/crops/${c.remoteId}', body: body);
+          }
+        }
+      }
+      pending.removeWhere((x) => x.label == 'Cultures · $plotCode');
+    } on ApiException catch (e) {
+      lastSyncError.value = e.userMessage;
+    }
   }
 
   void resolveIssue(SyncIssue issue) {

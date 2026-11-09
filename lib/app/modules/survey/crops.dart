@@ -165,8 +165,8 @@ class CropsController extends GetxController {
           icon: Symbols.error_rounded);
       return;
     }
-    session.declareCrops(
-        code, {for (var s = 0; s < plans.length; s++) s: plans[s].toList()});
+    session.declareCrops(owner, code,
+        {for (var s = 0; s < plans.length; s++) s: plans[s].toList()});
     final groups = [
       for (var s = 0; s < plans.length; s++)
         if (plans[s].any((c) => c.share > 0))
