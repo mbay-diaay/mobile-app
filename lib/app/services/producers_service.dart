@@ -39,10 +39,12 @@ class ProducersService extends GetxService {
       if (phone != null && phone.isNotEmpty) 'phone': _normalizePhone(phone),
       if (cni != null && cni.trim().isNotEmpty) 'cni': cni.trim(),
     };
-    final response = await _client.post('/producers', body: body);
-    if (response.statusCode != 200 && response.statusCode != 201) return null;
-    final data = ApiClient.decode(response);
-    return data is Map<String, dynamic> ? data : null;
+    try {
+      final data = await _client.post('/producers', body: body);
+      return data is Map<String, dynamic> ? data : null;
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Upload photo CNI (une face). Champ multipart « file ».

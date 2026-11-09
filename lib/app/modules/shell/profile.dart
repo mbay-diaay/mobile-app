@@ -191,18 +191,9 @@ Future<void> _connectApi(BuildContext context) async {
   try {
     final auth = Get.find<AuthService>();
     final challenge = await auth.signIn(email: email.text.trim(), password: password.text);
-    if (challenge == null) {
-      showToast('Identifiants refusés', icon: Symbols.error_rounded);
-      return;
-    }
-    final verified =
-        await auth.verifyOtp(challengeId: challenge, otp: otp.text.trim());
-    if (!verified) {
-      showToast('OTP invalide', icon: Symbols.error_rounded);
-      return;
-    }
+    await auth.verifyOtp(challengeId: challenge.id, code: otp.text.trim());
     final me = await auth.me();
-    final scoop = me?['scoopName'] as String? ?? me?['scoopId'] as String? ?? '';
+    final scoop = me.scoopName ?? me.role;
     showToast(
       scoop.isEmpty ? 'API connectée' : 'API · $scoop',
       icon: Symbols.check_circle_rounded,

@@ -38,7 +38,7 @@ class MbayDiaayApp extends StatelessWidget {
         title: 'Mbay Diaay',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.light,
-        locale: const Locale('fr', 'SN'),
+        locale: const Locale('fr', 'SN'), 
         initialRoute: Routes.splash,
         getPages: AppPages.pages,
         defaultTransition: Transition.cupertino,
