@@ -20,8 +20,8 @@ class BlockedController extends GetxController {
   final seconds = (total - 1).obs;
   Timer? _timer;
 
-  String get label =>
-      '${seconds.value ~/ 60}:${(seconds.value % 60).toString().padLeft(2, '0')}';
+  String get minutesLabel => '${seconds.value ~/ 60}';
+  String get secondsLabel => (seconds.value % 60).toString().padLeft(2, '0');
 
   @override
   void onInit() {
@@ -114,25 +114,13 @@ class BlockedView extends GetView<BlockedController> {
                           inner: AppColors.maroonRing,
                           child:
                               Column(mainAxisSize: MainAxisSize.min, children: [
-                            AnimatedSwitcher(
-                              duration: Motion.fast,
-                              transitionBuilder: (c, a) => FadeTransition(
-                                opacity: a,
-                                child: SlideTransition(
-                                  position: Tween(
-                                          begin: const Offset(0, -.3),
-                                          end: Offset.zero)
-                                      .animate(a),
-                                  child: c,
-                                ),
-                              ),
-                              child: Text(controller.label,
-                                  key: ValueKey(controller.seconds.value),
-                                  style: mono(52,
-                                      weight: FontWeight.w700,
-                                      color: Colors.white,
-                                      tracking: -.04)),
-                            ),
+                            // Chaque seconde, seules les secondes s'animent ; les minutes
+                            // ne bougent que lorsqu'elles changent.
+                            Row(mainAxisSize: MainAxisSize.min, children: [
+                              _RollingText(controller.minutesLabel),
+                              Text(':', style: _digitStyle),
+                              _RollingText(controller.secondsLabel),
+                            ]),
                             Text('avant nouvel essai',
                                 style:
                                     jakarta(11, color: AppColors.white(.55))),
@@ -158,6 +146,37 @@ class BlockedView extends GetView<BlockedController> {
           ),
         ),
       ),
+    );
+  }
+}
+
+final _digitStyle =
+    mono(52, weight: FontWeight.w700, color: Colors.white, tracking: -.04);
+
+/// Texte dont le changement de valeur descend du haut vers le bas : la nouvelle
+/// valeur entre par le haut, l'ancienne sort par le bas.
+class _RollingText extends StatelessWidget {
+  const _RollingText(this.value);
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final current = ValueKey(value);
+    return AnimatedSwitcher(
+      duration: Motion.fast,
+      transitionBuilder: (child, animation) {
+        final entering = child.key == current;
+        return FadeTransition(
+          opacity: animation,
+          child: SlideTransition(
+            position: Tween(
+                    begin: Offset(0, entering ? -.4 : .4), end: Offset.zero)
+                .animate(animation),
+            child: child,
+          ),
+        );
+      },
+      child: Text(value, key: current, style: _digitStyle),
     );
   }
 }
