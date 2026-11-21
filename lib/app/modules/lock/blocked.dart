@@ -14,9 +14,9 @@ import '../../widgets/buttons.dart';
 import '../../widgets/layout.dart';
 import '../../widgets/ring_progress.dart';
 
-/// 06 · PIN bloqué : compte à rebours de 5 minutes.
+/// 06 · PIN bloqué : compte à rebours de 3 minutes.
 class BlockedController extends GetxController {
-  static const total = 300;
+  static const total = 180;
   final seconds = (total - 1).obs;
   Timer? _timer;
 
