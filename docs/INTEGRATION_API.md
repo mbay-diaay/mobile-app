@@ -8,8 +8,8 @@ API : `https://api.mbaydiaay.com/v1` (production). Pour viser une API locale : `
 |---|---|---|
 | Client HTTP | En-tête `Authorization: Bearer`, délai de 20 s, erreurs `{code, message}` converties en messages français (`ApiException.userMessage`), réseau coupé = code `NETWORK`. | `services/api_client.dart` |
 | Session | Jetons gardés dans le stockage sécurisé de l'appareil (`flutter_secure_storage`). Sur 401, renouvellement automatique via `/auth/refresh` puis nouvel essai. Si le renouvellement échoue, retour à l'écran de connexion. | `services/api_client.dart`, `main.dart` |
-| Connexion | `POST /auth/sign-in` (e-mail + mot de passe), puis `POST /auth/otp/verify` (`challengeId` + `code`), puis `GET /me`. Renvoi du code via `/auth/otp/resend`, avec compte à rebours fourni par l'API. | `services/auth_service.dart`, `modules/activation/phone.dart`, `sms_code.dart` |
-| Écrans | Écran 01 : e-mail + mot de passe. Écran 02 : code OTP (erreurs affichées, secousse). Les écrans 03 (PIN) et 04 (téléchargement) restent identiques. Le profil affiche l'e-mail. | `modules/activation/`, `modules/shell/profile.dart` |
+| Connexion | Parcours technicien (voir `AUTHENTIFICATION_TECHNICIEN.md`) : `POST /auth/technician/activate` (téléphone + code à 5 chiffres + mot de passe) puis `POST /auth/technician/sign-in` (téléphone + mot de passe), puis `GET /me`. Ancien parcours conservé pour les comptes de test : `POST /auth/sign-in`, `POST /auth/otp/verify`, `/auth/otp/resend`. | `services/auth_service.dart`, `modules/activation/phone.dart`, `sms_code.dart` |
+| Écrans | Écran 01 : trois modes (première connexion, connexion, compte e-mail de test). Écran 02 : code e-mail, ancien parcours seulement. Les écrans 03 (PIN) et 04 (téléchargement) restent identiques. Le profil affiche l'e-mail. | `modules/activation/`, `modules/shell/profile.dart` |
 | Producteurs | `GET /producers` et `GET /scoops`, mis en cache dans `shared_preferences` : l'annuaire reste consultable hors ligne. Rafraîchi à l'écran 04 et à l'ouverture de l'accueil. Les fiches créées sur le téléphone restent en tête. | `services/producer_repository.dart`, `services/session_service.dart` |
 | Révocation | Prévient l'API (`/auth/logout`), supprime les jetons et le cache. | `services/session_service.dart` |
 | Android | Permission `INTERNET` ajoutée au manifeste. | `android/app/src/main/AndroidManifest.xml` |
@@ -35,12 +35,12 @@ API : `https://api.mbaydiaay.com/v1` (production). Pour viser une API locale : `
 8. Détail du producteur : afficher les champs réels (statut, CNI masquée), et la révélation de la CNI (`POST /producers/:id/cni/reveal`, avec motif) si le rôle le permet.
 9. Permissions : adapter les écrans selon `permissions[]` de `/me` (accès refusé = `FORBIDDEN`).
 10. Liste des producteurs : pagination par curseur côté interface (le curseur est déjà géré en lecture).
-11. PIN : un PIN déjà enregistré est conservé dans `shared_preferences`, en clair. À déplacer dans le stockage sécurisé.
+11. PIN : déjà conservé dans le stockage sécurisé (`flutter_secure_storage`) ; l'ancien PIN en clair de `shared_preferences` est migré au démarrage. Fait.
 12. Tests : aucun test automatique à ce jour (client HTTP, renouvellement de session, cache).
 13. Vérification sur appareils réels, Android et iOS, puis build iOS (non compilé depuis l'ajout du stockage sécurisé).
 
 **À demander à l'équipe backend**
-- Connexion par téléphone + SMS (le flux actuel du produit), ou confirmation que l'e-mail reste la voie mobile.
+- Connexion technicien : l'API fournit téléphone + code à 5 chiffres puis téléphone + mot de passe. Reste côté API : révocation du jeton de renouvellement à la déconnexion, rotation, blocage après essais faux sur `technician/sign-in`.
 - Une fiche producteur complète (village, âge, téléphone, sexe, organisation).
 - Routes de création et de modification de producteur, de parcelles et de cultures.
 - Routes de synchronisation hors ligne.

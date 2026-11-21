@@ -138,8 +138,8 @@ dart format lib                          # Format code
 
 See `README.md` for the full diagram. Key entry/exit points:
 
-- **01 Phone** → valid `77 123 45 67` / `78 111 22 33` → `Routes.smsCode`.
-- **02 SMS code** → any 6 digits → `Routes.pinCreate`.
+- **01 Login** → three modes: first login (phone + 5-digit code + new password, `POST /auth/technician/activate`), login (phone + password, `POST /auth/technician/sign-in`), legacy e-mail test mode → `Routes.smsCode`. Technician modes go straight to `Routes.pinCreate` after `GET /me`. See `docs/AUTHENTIFICATION_TECHNICIEN.md`.
+- **02 E-mail code** (legacy test mode only) → 6-digit OTP → `Routes.pinCreate`.
 - **03 PIN create/confirm** → `Routes.download`.
 - **04 Download** → `completeActivation()` → `Routes.unlock`.
 - **05 Unlock** → PIN check → `Routes.shell` (5 tabs).
@@ -156,4 +156,4 @@ See `README.md` for the full diagram. Key entry/exit points:
 - **22 À compléter** — TODO list from `SessionService.todoCount`.
 - **23 Espace producteur** — aperçu de ce que voit le producteur connecté.
 - **24 Profil** — changer PIN, réseau simulation, révocation.
-- **25 Revoked** — phone désactivé, glissez pour réactiver → `Routes.phone`.
+- **25 Revoked** — phone désactivé, glissez pour réactiver → `Routes.phone`. A refused session refresh also leads to `Routes.phone` (reconnect mode, PIN and local data kept).

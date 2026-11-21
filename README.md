@@ -2,7 +2,7 @@
 
 Application Flutter + GetX tirée de la maquette **Mbay Diaay Mobile v2** (Claude Design) : vert forêt, accent citron, fond crème, gros chiffres, cartes très arrondies, et des animations très expressives entre les écrans et les éléments.
 
-C'est un **prototype hors ligne** (données mock en mémoire). La connexion téléphone utilise des comptes de test.
+C'est un **prototype hors ligne** (données mock en mémoire). La connexion se fait par téléphone + code à 5 chiffres (première fois) puis téléphone + mot de passe ; voir `docs/AUTHENTIFICATION_TECHNICIEN.md`.
 
 **Créer un producteur sur le serveur** : Profil → « Session API (technicien) » (ex. `fatou.sarr@cradesc.example` / `Demonstration2026` / OTP `000000`) → Producteurs → Nouveau. Si la session API est ouverte et le réseau simulé « Connecté », la fiche part en `POST /v1/producers` (sinon elle reste en attente locale).
 
@@ -21,8 +21,8 @@ Flutter 3.27 ou plus récent (Dart ≥ 3.6). Les polices (Plus Jakarta Sans, Jet
 
 | Étape | Valeur |
 |---|---|
-| Numéro (01) | `77 123 45 67` (Ibrahima Diagne) ou `78 111 22 33` (Awa Ndiaye). Tout autre numéro est refusé. |
-| Code SMS (02) | `482913`. Tout code à 6 chiffres est aussi accepté. |
+| Technicien (01) | Créé par un gestionnaire depuis le web : il remet un code à **5 chiffres** (72 h, une seule fois). Première connexion : téléphone + code + nouveau mot de passe ; ensuite téléphone + mot de passe. |
+| Compte e-mail de test (01 › « Compte e-mail (test) », puis 02) | `fatou.sarr@cradesc.example` / `Demonstration2026`, code e-mail `000000` tant que `TEST_ACCOUNTS_OTP=true` sur le serveur. |
 | PIN (03 → 05) | Celui que vous choisissez. Si l'activation est sautée, c'est `1234`. Trois erreurs bloquent le téléphone (06). |
 | Doublon (12) | Créez « Aliou Ba » à Mboro. |
 | Relevé de parcelle (14 à 16) | GPS réel uniquement : marchez jusqu'à chaque angle et touchez +. Un contour dont deux côtés se coupent ouvre l'écran 16. |
@@ -32,7 +32,7 @@ Flutter 3.27 ou plus récent (Dart ≥ 3.6). Les polices (Plus Jakarta Sans, Jet
 ## Parcours et liens entre écrans
 
 ```
-Démarrage ─► 01 Téléphone ─► 02 Code SMS ─► 03 PIN + confirmation ─► 04 Téléchargement ─► 05 PIN
+Démarrage ─► 01 Connexion (téléphone + code 5 chiffres / mot de passe) ─► 03 PIN + confirmation ─► 04 Téléchargement ─► 05 PIN
                                                                                                │
                          06 PIN bloqué ◄── 3 erreurs ──────────────────────────────────────────┤
                                                                                                ▼
