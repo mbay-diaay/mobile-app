@@ -61,6 +61,9 @@ class AuthUser {
       );
 
   bool can(String permission) => permissions.contains(permission);
+
+  /// Rôle exigé pour utiliser l'application mobile.
+  static const technicianRole = 'technicien';
 }
 
 /// Authentification mobile : sign-in (e-mail + mot de passe) → OTP → jetons → /me.
@@ -88,6 +91,34 @@ class AuthService extends GetxService {
         accessToken: map['accessToken'] as String,
         refreshToken: map['refreshToken'] as String?);
     return AuthUser.fromJson(map['user'] as Map<String, dynamic>);
+  }
+
+  /// Première connexion d'un technicien : téléphone + code temporaire à 5 chiffres (remis en main
+  /// propre par le gestionnaire) + mot de passe choisi. Renvoie directement les jetons.
+  Future<AuthUser> activateTechnician(
+      {required String phone,
+      required String code,
+      required String password}) async {
+    final data = await _client.post('/auth/technician/activate',
+        auth: false,
+        body: {'phone': phone.trim(), 'code': code, 'password': password});
+    return _keepSession(data as Map<String, dynamic>);
+  }
+
+  /// Connexions suivantes d'un technicien : téléphone + mot de passe, sans code par e-mail.
+  Future<AuthUser> signInTechnician(
+      {required String phone, required String password}) async {
+    final data = await _client.post('/auth/technician/sign-in',
+        auth: false, body: {'phone': phone.trim(), 'password': password});
+    return _keepSession(data as Map<String, dynamic>);
+  }
+
+  /// Conserve les jetons de la réponse et renvoie l'utilisateur.
+  Future<AuthUser> _keepSession(Map<String, dynamic> map) async {
+    await _client.setTokens(
+        accessToken: map['accessToken'] as String,
+        refreshToken: map['refreshToken'] as String?);
+    return AuthUser.fromJson((map['user'] as Map<String, dynamic>?) ?? const {});
   }
 
   /// Renvoie un code pour le même défi.

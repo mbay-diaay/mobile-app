@@ -27,6 +27,9 @@ class ApiException implements Exception {
         'OTP_INVALID' => 'Code incorrect. Vérifiez et réessayez.',
         'OTP_EXPIRED' => 'Ce code a expiré. Demandez-en un nouveau.',
         'OTP_ATTEMPTS' => 'Trop de tentatives. Demandez un nouveau code.',
+        'INVALID_ACTIVATION' => 'Numéro ou code invalide, ou code expiré.',
+        'ACTIVATION_LOCKED' =>
+          'Trop d\'essais : demandez un nouveau code à votre gestionnaire.',
         'RATE_LIMITED' => 'Trop de tentatives. Patientez un instant.',
         'REFRESH_INVALID' ||
         'UNAUTHENTICATED' ||
@@ -203,7 +206,10 @@ class ApiClient extends GetxService {
     try {
       final res = await _send('POST', '/auth/refresh',
           body: {'refreshToken': _refreshToken});
-      if (res.statusCode != 200 && res.statusCode != 201) return false;
+      // Seul un refus explicite (401/403) perd la session : un 429 ou une panne serveur (5xx)
+      // garde les jetons, la requête échouera et pourra être rejouée plus tard.
+      if (res.statusCode == 401 || res.statusCode == 403) return false;
+      if (res.statusCode != 200 && res.statusCode != 201) return true;
       final data = jsonDecode(res.body);
       final access = data['accessToken'] as String?;
       if (access == null) return false;

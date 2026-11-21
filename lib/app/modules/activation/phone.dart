@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
@@ -8,62 +9,190 @@ import '../../core/app_theme.dart';
 import '../../routes/app_routes.dart';
 import '../../services/api_client.dart';
 import '../../services/auth_service.dart';
+import '../../services/session_service.dart';
 import '../../widgets/animations.dart';
 import '../../widgets/buttons.dart';
 import '../../widgets/layout.dart';
 import "package:flutter/foundation.dart";
 
-/// 01 · Activation · e-mail et mot de passe (puis code OTP à l'étape 02).
+/// 01 · Activation · connexion du technicien.
+/// - `first` : première connexion = téléphone + code à 5 chiffres + mot de passe à choisir.
+/// - `password` : téléphone + mot de passe (aucun code par e-mail).
+/// - `email` : ancien parcours de test (e-mail + mot de passe, puis code à l'étape 02).
+enum LoginMode { first, password, email }
+
+/// Formes acceptées par l'API (mêmes règles côté serveur).
+final _phoneRe = RegExp(r'^\+?[\d\s.-]{9,20}$');
+final _codeRe = RegExp(r'^\d{5}$');
+
 /// Forme d'adresse simple ; `GetUtils.isEmail` refuse les domaines de plus de 5 lettres (« .example »).
 final _emailRe = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]{2,}$');
 
+/// Mot de passe : 8 caractères au moins, une lettre et un chiffre.
+bool _isStrongPassword(String value) =>
+    value.length >= 8 &&
+    RegExp(r'[A-Za-z]').hasMatch(value) &&
+    RegExp(r'\d').hasMatch(value);
+
 class PhoneController extends GetxController {
-  final email = TextEditingController();
+  final mode = LoginMode.first.obs;
+
+  /// Session expirée : reconnexion par mot de passe, les données du téléphone sont gardées.
+  bool reconnect = false;
+
+  final phone = TextEditingController();
+  final code = TextEditingController();
   final password = TextEditingController();
-  final emailFocus = FocusNode();
+  final confirm = TextEditingController();
+  final email = TextEditingController();
+  final phoneFocus = FocusNode();
+  final codeFocus = FocusNode();
   final passFocus = FocusNode();
+  final confirmFocus = FocusNode();
+  final emailFocus = FocusNode();
   final hidden = true.obs;
-  final emailText = ''.obs;
-  final passText = ''.obs;
+
+  /// Incrémenté à chaque frappe pour recalculer [valid].
+  final revision = 0.obs;
   final error = RxnString();
   final shake = 0.obs;
 
-  bool get valid =>
-      _emailRe.hasMatch(emailText.value.trim()) && passText.value.length >= 8;
+  @override
+  void onInit() {
+    super.onInit();
+    final args = Get.arguments;
+    if (args is Map && args['reconnect'] == true) {
+      reconnect = true;
+      mode.value = LoginMode.password;
+      error.value = 'Votre session a expiré. Reconnectez-vous.';
+    }
+  }
+
+  bool get valid {
+    revision.value;
+    switch (mode.value) {
+      case LoginMode.first:
+        return _phoneRe.hasMatch(phone.text.trim()) &&
+            _codeRe.hasMatch(code.text) &&
+            _isStrongPassword(password.text) &&
+            confirm.text == password.text;
+      case LoginMode.password:
+        return _phoneRe.hasMatch(phone.text.trim()) && password.text.length >= 8;
+      case LoginMode.email:
+        return _emailRe.hasMatch(email.text.trim()) && password.text.length >= 8;
+    }
+  }
+
+  void setMode(LoginMode next) {
+    if (mode.value == next) return;
+    mode.value = next;
+    error.value = null;
+    revision.value++;
+  }
 
   void onChanged() {
-    emailText.value = email.text;
-    passText.value = password.text;
+    revision.value++;
     error.value = null;
+  }
+
+  void _unfocusAll() {
+    for (final node in [phoneFocus, codeFocus, passFocus, confirmFocus, emailFocus]) {
+      node.unfocus();
+    }
+  }
+
+  void _fail(String message) {
+    error.value = message;
+    shake.value++;
   }
 
   Future<void> submit() async {
     if (!valid) return;
-    emailFocus.unfocus();
-    passFocus.unfocus();
+    _unfocusAll();
+    final auth = Get.find<AuthService>();
     try {
-      final challenge = await Get.find<AuthService>()
-          .signIn(email: email.text, password: password.text);
-      Get.toNamed(Routes.smsCode, arguments: challenge);
+      if (mode.value == LoginMode.email) {
+        final challenge =
+            await auth.signIn(email: email.text, password: password.text);
+        Get.toNamed(Routes.smsCode, arguments: challenge);
+        return;
+      }
+      final user = mode.value == LoginMode.first
+          ? await auth.activateTechnician(
+              phone: phone.text, code: code.text, password: password.text)
+          : await auth.signInTechnician(
+              phone: phone.text, password: password.text);
+      await _finish(auth, user);
     } on ApiException catch (e) {
       debugPrint("[ERROR][Phone.submit] ${e}");
-      error.value = e.userMessage;
-      shake.value++;
+      _fail(e.userMessage);
     }
+  }
+
+  /// Suite d'une connexion réussie : profil, contrôle du rôle, puis PIN ou retour à l'accueil.
+  Future<void> _finish(AuthService auth, AuthUser fromLogin) async {
+    final me = await auth.me();
+    if (me.role != AuthUser.technicianRole) {
+      await Get.find<ApiClient>().clearTokens();
+      _fail('Cette application est réservée aux techniciens.');
+      return;
+    }
+    final session = Get.find<SessionService>();
+    if (reconnect) {
+      if (session.activated.value && me.email == session.account.value.email) {
+        await session.refreshMe();
+        Get.offAllNamed(Routes.shell);
+        return;
+      }
+      // Autre technicien : on ferme sa session et on vide le téléphone avant tout nouvel accès.
+      await auth.logout();
+      session.revoke();
+      reconnect = false;
+      password.clear();
+      revision.value++;
+      _fail(
+          "Ce téléphone était utilisé par un autre compte : il a été réinitialisé. Reconnectez-vous.");
+      return;
+    }
+    session.signIn(TestAccount.fromUser(me, scoop: me.scoopName ?? ''),
+        permissions: me.permissions);
+    Get.toNamed(Routes.pinCreate);
   }
 
   @override
   void onClose() {
-    email.dispose();
+    phone.dispose();
+    code.dispose();
     password.dispose();
-    emailFocus.dispose();
+    confirm.dispose();
+    email.dispose();
+    phoneFocus.dispose();
+    codeFocus.dispose();
     passFocus.dispose();
+    confirmFocus.dispose();
+    emailFocus.dispose();
     super.onClose();
   }
 }
 
 class PhoneView extends GetView<PhoneController> {
   const PhoneView({super.key});
+
+  String _title(LoginMode mode) {
+    if (controller.reconnect) return 'Reconnexion';
+    return switch (mode) {
+      LoginMode.first => 'Première connexion',
+      LoginMode.password => 'Connexion à votre compte',
+      LoginMode.email => 'Compte e-mail (test)',
+    };
+  }
+
+  String _hint(LoginMode mode) => switch (mode) {
+        LoginMode.first =>
+          'Le code à 5 chiffres vous est remis par votre gestionnaire. Il ne sert qu\'une fois.',
+        LoginMode.password => 'Utilisez le mot de passe choisi à votre première connexion.',
+        LoginMode.email => 'Un code de vérification arrive par e-mail.',
+      };
 
   @override
   Widget build(BuildContext context) {
@@ -85,19 +214,25 @@ class PhoneView extends GetView<PhoneController> {
                           children: [StepLabel(1), StepIndicator(step: 1)]),
                     ),
                     const SizedBox(height: 20),
-                    const FadeSlideIn(
-                      delay: Duration(milliseconds: 100),
+                    FadeSlideIn(
+                      delay: const Duration(milliseconds: 100),
                       scale: .4,
                       curve: Curves.elasticOut,
-                      duration: Duration(milliseconds: 1100),
-                      child: IconTile(Symbols.mail_rounded,
-                          size: 56, radius: 18, iconSize: 30, fill: true),
+                      duration: const Duration(milliseconds: 1100),
+                      child: Obx(() => IconTile(
+                          controller.mode.value == LoginMode.email
+                              ? Symbols.mail_rounded
+                              : Symbols.call_rounded,
+                          size: 56,
+                          radius: 18,
+                          iconSize: 30,
+                          fill: true)),
                     ),
                     const SizedBox(height: 20),
                     FadeSlideIn(
                       delay: const Duration(milliseconds: 180),
-                      child: Text('Connexion à votre compte',
-                          style: display(30, color: Colors.white)),
+                      child: Obx(() => Text(_title(controller.mode.value),
+                          style: display(30, color: Colors.white))),
                     ),
                     const SizedBox(height: 8),
                     FadeSlideIn(
@@ -113,100 +248,219 @@ class PhoneView extends GetView<PhoneController> {
           Expanded(
             child: RisingSheet(
               child: FillScroll(
-                child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      const _FieldLabel('E-MAIL'),
-                      const SizedBox(height: 10),
-                      Obx(() => Shake(
-                          trigger: controller.shake.value,
-                          child: _Field(
-                            controller: controller.email,
-                            focus: controller.emailFocus,
-                            hint: 'prenom.nom@cradesc.example',
-                            icon: Symbols.alternate_email_rounded,
-                            keyboard: TextInputType.emailAddress,
+                child: Obx(() {
+                  final mode = controller.mode.value;
+                  return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (!controller.reconnect && mode != LoginMode.email) ...[
+                          _ModeSwitch(controller: controller),
+                          const SizedBox(height: 18),
+                        ],
+                        if (mode == LoginMode.email) ...[
+                          const _FieldLabel('E-MAIL'),
+                          const SizedBox(height: 10),
+                          Shake(
+                              trigger: controller.shake.value,
+                              child: _Field(
+                                controller: controller.email,
+                                focus: controller.emailFocus,
+                                hint: 'prenom.nom@cradesc.example',
+                                icon: Symbols.alternate_email_rounded,
+                                keyboard: TextInputType.emailAddress,
+                                onChanged: controller.onChanged,
+                                onSubmitted: controller.passFocus.requestFocus,
+                              )),
+                        ] else ...[
+                          const _FieldLabel('TÉLÉPHONE'),
+                          const SizedBox(height: 10),
+                          Shake(
+                              trigger: controller.shake.value,
+                              child: _Field(
+                                controller: controller.phone,
+                                focus: controller.phoneFocus,
+                                hint: '77 123 45 67',
+                                icon: Symbols.call_rounded,
+                                keyboard: TextInputType.phone,
+                                onChanged: controller.onChanged,
+                                onSubmitted: () => (mode == LoginMode.first
+                                        ? controller.codeFocus
+                                        : controller.passFocus)
+                                    .requestFocus(),
+                              )),
+                        ],
+                        if (mode == LoginMode.first) ...[
+                          const SizedBox(height: 16),
+                          const _FieldLabel('CODE À 5 CHIFFRES'),
+                          const SizedBox(height: 10),
+                          _Field(
+                            controller: controller.code,
+                            focus: controller.codeFocus,
+                            hint: '12345',
+                            icon: Symbols.pin_rounded,
+                            keyboard: TextInputType.number,
+                            formatters: [
+                              FilteringTextInputFormatter.digitsOnly,
+                              LengthLimitingTextInputFormatter(5),
+                            ],
                             onChanged: controller.onChanged,
                             onSubmitted: controller.passFocus.requestFocus,
-                          ))),
-                      const SizedBox(height: 16),
-                      const _FieldLabel('MOT DE PASSE'),
-                      const SizedBox(height: 10),
-                      Obx(() => _Field(
-                            controller: controller.password,
-                            focus: controller.passFocus,
-                            hint: '8 caractères minimum',
+                          ),
+                        ],
+                        const SizedBox(height: 16),
+                        _FieldLabel(mode == LoginMode.first
+                            ? 'NOUVEAU MOT DE PASSE'
+                            : 'MOT DE PASSE'),
+                        const SizedBox(height: 10),
+                        _Field(
+                          controller: controller.password,
+                          focus: controller.passFocus,
+                          hint: mode == LoginMode.first
+                              ? '8 caractères, une lettre et un chiffre'
+                              : '8 caractères minimum',
+                          icon: Symbols.lock_rounded,
+                          obscure: controller.hidden.value,
+                          onChanged: controller.onChanged,
+                          onSubmitted: mode == LoginMode.first
+                              ? controller.confirmFocus.requestFocus
+                              : controller.submit,
+                          trailing: GestureDetector(
+                            onTap: controller.hidden.toggle,
+                            child: Sym(
+                                controller.hidden.value
+                                    ? Symbols.visibility_rounded
+                                    : Symbols.visibility_off_rounded,
+                                size: 22,
+                                color: AppColors.muted),
+                          ),
+                        ),
+                        if (mode == LoginMode.first) ...[
+                          const SizedBox(height: 16),
+                          const _FieldLabel('CONFIRMER LE MOT DE PASSE'),
+                          const SizedBox(height: 10),
+                          _Field(
+                            controller: controller.confirm,
+                            focus: controller.confirmFocus,
+                            hint: 'Retapez le mot de passe',
                             icon: Symbols.lock_rounded,
                             obscure: controller.hidden.value,
                             onChanged: controller.onChanged,
                             onSubmitted: controller.submit,
-                            trailing: GestureDetector(
-                              onTap: controller.hidden.toggle,
-                              child: Sym(
-                                  controller.hidden.value
-                                      ? Symbols.visibility_rounded
-                                      : Symbols.visibility_off_rounded,
-                                  size: 22,
-                                  color: AppColors.muted),
+                          ),
+                        ],
+                        const SizedBox(height: 14),
+                        _Banner(
+                            message: controller.error.value,
+                            hint: _hint(mode)),
+                        const Spacer(),
+                        if (!controller.reconnect)
+                          Center(
+                            child: TextButton(
+                              onPressed: () => controller.setMode(
+                                  mode == LoginMode.email
+                                      ? LoginMode.password
+                                      : LoginMode.email),
+                              child: Text(
+                                  mode == LoginMode.email
+                                      ? 'Connexion par téléphone'
+                                      : 'Compte e-mail (test)',
+                                  style: jakarta(12,
+                                      weight: FontWeight.w600,
+                                      color: AppColors.muted)),
                             ),
-                          )),
-                      const SizedBox(height: 14),
-                      FadeSlideIn(
-                        delay: const Duration(milliseconds: 500),
-                        child: Obx(() {
-                          final msg = controller.error.value;
-                          final bad = msg != null;
-                          return AnimatedContainer(
-                            duration: Motion.medium,
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 14, vertical: 12),
-                            decoration: BoxDecoration(
-                                color: bad ? AppColors.redSoft : AppColors.sage,
-                                borderRadius: BorderRadius.circular(16)),
-                            child: Row(children: [
-                              Sym(
-                                  bad
-                                      ? Symbols.error_rounded
-                                      : Symbols.mark_email_read_rounded,
-                                  size: 20,
-                                  color: bad
-                                      ? AppColors.redInk
-                                      : AppColors.forest),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  msg ??
-                                      'Un code de vérification arrive par e-mail.',
-                                  style: jakarta(13,
-                                      color: bad
-                                          ? AppColors.redInk
-                                          : AppColors.inkSoft,
-                                      weight: bad
-                                          ? FontWeight.w700
-                                          : FontWeight.w500),
-                                ),
-                              ),
-                            ]),
-                          );
-                        }),
-                      ),
-                      const Spacer(),
-                      const SizedBox(height: 16),
-                      FadeSlideIn(
-                        delay: const Duration(milliseconds: 600),
-                        child: Obx(() => SwipeCta(
-                              label: 'Glissez pour recevoir le code',
-                              busyLabel: 'Envoi du code…',
-                              onConfirm:
-                                  controller.valid ? controller.submit : null,
-                            )),
-                      ),
-                    ]),
+                          ),
+                        const SizedBox(height: 8),
+                        FadeSlideIn(
+                          delay: const Duration(milliseconds: 600),
+                          child: SwipeCta(
+                            label: switch (mode) {
+                              LoginMode.first => 'Glissez pour activer',
+                              LoginMode.password => 'Glissez pour vous connecter',
+                              LoginMode.email => 'Glissez pour recevoir le code',
+                            },
+                            busyLabel: mode == LoginMode.email
+                                ? 'Envoi du code…'
+                                : 'Connexion…',
+                            onConfirm: controller.valid ? controller.submit : null,
+                          ),
+                        ),
+                      ]);
+                }),
               ),
             ),
           ),
         ]),
       ),
+    );
+  }
+}
+
+/// Choix entre première connexion (code) et connexion habituelle (mot de passe).
+class _ModeSwitch extends StatelessWidget {
+  const _ModeSwitch({required this.controller});
+  final PhoneController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget option(String label, LoginMode value) {
+      final selected = controller.mode.value == value;
+      return Expanded(
+        child: GestureDetector(
+          onTap: () => controller.setMode(value),
+          child: AnimatedContainer(
+            duration: Motion.fast,
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            decoration: BoxDecoration(
+                color: selected ? AppColors.forest : Colors.transparent,
+                borderRadius: BorderRadius.circular(14)),
+            alignment: Alignment.center,
+            child: Text(label,
+                style: jakarta(13,
+                    weight: FontWeight.w700,
+                    color: selected ? Colors.white : AppColors.forest)),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+          color: AppColors.sage, borderRadius: BorderRadius.circular(18)),
+      child: Row(children: [
+        option('Première connexion', LoginMode.first),
+        option('J\'ai un mot de passe', LoginMode.password),
+      ]),
+    );
+  }
+}
+
+/// Message d'erreur (rouge) ou d'aide (vert pâle).
+class _Banner extends StatelessWidget {
+  const _Banner({required this.message, required this.hint});
+  final String? message;
+  final String hint;
+
+  @override
+  Widget build(BuildContext context) {
+    final bad = message != null;
+    return AnimatedContainer(
+      duration: Motion.medium,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+          color: bad ? AppColors.redSoft : AppColors.sage,
+          borderRadius: BorderRadius.circular(16)),
+      child: Row(children: [
+        Sym(bad ? Symbols.error_rounded : Symbols.info_rounded,
+            size: 20, color: bad ? AppColors.redInk : AppColors.forest),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(message ?? hint,
+              style: jakarta(13,
+                  color: bad ? AppColors.redInk : AppColors.inkSoft,
+                  weight: bad ? FontWeight.w700 : FontWeight.w500)),
+        ),
+      ]),
     );
   }
 }
@@ -231,6 +485,7 @@ class _Field extends StatelessWidget {
     required this.onChanged,
     required this.onSubmitted,
     this.keyboard,
+    this.formatters,
     this.obscure = false,
     this.trailing,
   });
@@ -242,6 +497,7 @@ class _Field extends StatelessWidget {
   final VoidCallback onChanged;
   final VoidCallback onSubmitted;
   final TextInputType? keyboard;
+  final List<TextInputFormatter>? formatters;
   final bool obscure;
   final Widget? trailing;
 
@@ -273,6 +529,7 @@ class _Field extends StatelessWidget {
               controller: controller,
               focusNode: focus,
               keyboardType: keyboard,
+              inputFormatters: formatters,
               obscureText: obscure,
               autocorrect: false,
               enableSuggestions: false,

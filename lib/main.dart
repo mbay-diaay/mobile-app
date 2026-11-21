@@ -27,9 +27,11 @@ Future<void> main() async {
   // jetons restés dans le trousseau (iOS les garde après la suppression de l'app).
   if (!session.activated.value) await Get.find<ApiClient>().clearTokens();
   // Session refusée par l'API (jeton révoqué ou expiré) : retour à la connexion.
+  // On ne vide pas le téléphone (PIN, fiches en attente) : le technicien se reconnecte
+  // avec son mot de passe et retrouve ses données.
   Get.find<ApiClient>().onSessionExpired = () {
-    session.revoke();
-    Get.offAllNamed(Routes.phone);
+    if (Get.currentRoute == Routes.phone) return;
+    Get.offAllNamed(Routes.phone, arguments: {'reconnect': true});
   };
   if (session.activated.value) await session.restoreProducers();
   runApp(const MbayDiaayApp());
