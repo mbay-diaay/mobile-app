@@ -66,7 +66,9 @@ abstract final class AppPages {
       name: Routes.blocked,
       page: () => const BlockedView(),
       binding: BindingsBuilder.put(() => BlockedController()),
-      transition: Transition.zoom,
+      // Ouverture naturelle, de la droite vers la gauche, comme les écrans d'activation.
+      customTransition: SlidePushTransition(),
+      transitionDuration: Motion.slow,
     ),
     GetPage(
         name: Routes.revoked,
