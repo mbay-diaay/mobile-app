@@ -7,6 +7,7 @@ import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
 
 import 'api_config.dart';
+import 'device_service.dart';
 import "package:flutter/foundation.dart";
 
 /// Erreur renvoyée par l'API (`{ code, message, details? }`) ou par le réseau (`NETWORK`).
@@ -31,6 +32,10 @@ class ApiException implements Exception {
         'ACTIVATION_LOCKED' =>
           'Trop d\'essais : demandez un nouveau code à votre gestionnaire.',
         'RATE_LIMITED' => 'Trop de tentatives. Patientez un instant.',
+        'DEVICE_REVOKED' =>
+          'Cet appareil a été révoqué. Contactez votre gestionnaire.',
+        'DEVICE_SIGNED_OUT' =>
+          'Votre session a été fermée par votre gestionnaire. Reconnectez-vous.',
         'REFRESH_INVALID' ||
         'UNAUTHENTICATED' ||
         'UNAUTHORIZED' =>
@@ -61,6 +66,10 @@ class ApiClient extends GetxService {
   String? _accessToken;
   String? _refreshToken;
   Future<bool>? _refreshing;
+  String? _installationId;
+
+  /// Dernier refus d'appareil (`DEVICE_REVOKED` ou `DEVICE_SIGNED_OUT`) reçu au renouvellement de la session.
+  String? _deviceRefusal;
 
   /// Appelé quand la session ne peut plus être renouvelée (jeton refusé).
   void Function()? onSessionExpired;
@@ -70,6 +79,11 @@ class ApiClient extends GetxService {
   String? get refreshToken => _refreshToken;
   bool get hasSession => _refreshToken != null;
 
+  /// Identifiant d'installation de cet appareil, envoyé dans l'en-tête `X-Device-Id`.
+  String? get installationId => _installationId;
+
+  static const deviceRefusals = {'DEVICE_REVOKED', 'DEVICE_SIGNED_OUT'};
+
   /// Recharge les jetons enregistrés (au démarrage).
   Future<ApiClient> init() async {
     try {
@@ -78,6 +92,7 @@ class ApiClient extends GetxService {
     } catch (e) {
       debugPrint("[ERROR][ApiClient.init] $e");
     }
+    _installationId = await DeviceService.loadInstallationId(_storage);
     return this;
   }
 
@@ -111,6 +126,7 @@ class ApiClient extends GetxService {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
         if (_accessToken != null) 'Authorization': 'Bearer $_accessToken',
+        if (_installationId != null) 'X-Device-Id': _installationId!,
       };
 
   Uri _uri(String path, [Map<String, dynamic>? query]) {
@@ -131,11 +147,17 @@ class ApiClient extends GetxService {
   }) async {
     var res = await _send(method, path, body: body, query: query);
     if (res.statusCode == 401 && auth && _refreshToken != null) {
+      // Appareil révoqué ou déconnecté par un administrateur : inutile de renouveler la session.
+      final refusal = _deviceRefusalIn(res);
+      if (refusal != null) return _endSessionOnRefusal(refusal, res);
       if (await _refresh()) {
         res = await _send(method, path, body: body, query: query);
       } else {
+        final refused = _deviceRefusal;
+        _deviceRefusal = null;
         await clearTokens();
         onSessionExpired?.call();
+        if (refused != null) return _endSessionOnRefusal(refused, res);
       }
     }
     return _decodeOrThrow(res);
@@ -160,6 +182,9 @@ class ApiClient extends GetxService {
         ..files.add(await http.MultipartFile.fromPath(field, filePath));
       if (_accessToken != null) {
         req.headers['Authorization'] = 'Bearer $_accessToken';
+      }
+      if (_installationId != null) {
+        req.headers['X-Device-Id'] = _installationId!;
       }
       try {
         final streamed = await req.send().timeout(ApiConfig.timeout * 3);
@@ -208,7 +233,10 @@ class ApiClient extends GetxService {
           body: {'refreshToken': _refreshToken});
       // Seul un refus explicite (401/403) perd la session : un 429 ou une panne serveur (5xx)
       // garde les jetons, la requête échouera et pourra être rejouée plus tard.
-      if (res.statusCode == 401 || res.statusCode == 403) return false;
+      if (res.statusCode == 401 || res.statusCode == 403) {
+        _deviceRefusal = _deviceRefusalIn(res);
+        return false;
+      }
       if (res.statusCode != 200 && res.statusCode != 201) return true;
       final data = jsonDecode(res.body);
       final access = data['accessToken'] as String?;
@@ -224,6 +252,28 @@ class ApiClient extends GetxService {
       debugPrint("[ERROR][ApiClient._doRefresh] $e");
       return false;
     }
+  }
+
+  /// Code d'appareil refusé (`DEVICE_REVOKED`, `DEVICE_SIGNED_OUT`) dans une réponse 401, sinon null.
+  String? _deviceRefusalIn(http.Response res) {
+    try {
+      final data = jsonDecode(res.body);
+      if (data is Map) {
+        final inner = data['details'];
+        final code = (inner is Map ? inner['code'] : null) ?? data['code'];
+        if (code is String && deviceRefusals.contains(code)) return code;
+      }
+    } catch (_) {
+      // Corps illisible : pas un refus d'appareil.
+    }
+    return null;
+  }
+
+  /// Ferme la session et lève l'erreur dédiée, pour que l'écran affiche le bon message.
+  Future<dynamic> _endSessionOnRefusal(String code, http.Response res) async {
+    await clearTokens();
+    onSessionExpired?.call();
+    throw ApiException(code, '', status: res.statusCode);
   }
 
   dynamic _decodeOrThrow(http.Response res) {

@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:get/get.dart';
 
 import 'api_client.dart';
+import 'device_service.dart';
 import "package:flutter/foundation.dart";
 
 /// Étape OTP en attente, renvoyée par `POST /auth/sign-in`.
@@ -69,9 +72,14 @@ class AuthUser {
 /// Authentification mobile : sign-in (e-mail + mot de passe) → OTP → jetons → /me.
 /// Les erreurs sont des [ApiException] (messages français via `userMessage`).
 class AuthService extends GetxService {
-  AuthService({ApiClient? client}) : _client = client ?? Get.find<ApiClient>();
+  AuthService({ApiClient? client}) : _client = client ?? Get.find<ApiClient>() {
+    device = DeviceService(_client);
+  }
 
   final ApiClient _client;
+
+  /// Enregistrement de l'appareil : appelé après chaque connexion et à chaque lecture du profil.
+  late final DeviceService device;
 
   /// Étape 1 : e-mail + mot de passe → défi OTP.
   Future<SignInChallenge> signIn(
@@ -90,6 +98,7 @@ class AuthService extends GetxService {
     await _client.setTokens(
         accessToken: map['accessToken'] as String,
         refreshToken: map['refreshToken'] as String?);
+    unawaited(device.register());
     return AuthUser.fromJson(map['user'] as Map<String, dynamic>);
   }
 
@@ -118,7 +127,9 @@ class AuthService extends GetxService {
     await _client.setTokens(
         accessToken: map['accessToken'] as String,
         refreshToken: map['refreshToken'] as String?);
-    return AuthUser.fromJson((map['user'] as Map<String, dynamic>?) ?? const {});
+    unawaited(device.register());
+    return AuthUser.fromJson(
+        (map['user'] as Map<String, dynamic>?) ?? const {});
   }
 
   /// Renvoie un code pour le même défi.
@@ -134,8 +145,13 @@ class AuthService extends GetxService {
   }
 
   /// Profil, rôle, SCOOP et permissions effectives.
-  Future<AuthUser> me() async =>
-      AuthUser.fromJson(await _client.get('/me') as Map<String, dynamic>);
+  Future<AuthUser> me() async {
+    final user =
+        AuthUser.fromJson(await _client.get('/me') as Map<String, dynamic>);
+    // Chaque ouverture de l'application met à jour la dernière activité de l'appareil.
+    unawaited(device.register());
+    return user;
+  }
 
   /// Déconnexion : prévient le serveur (sans bloquer hors ligne) puis jette les jetons.
   Future<void> logout() async {
