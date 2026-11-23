@@ -12,61 +12,109 @@ import '../../widgets/buttons.dart';
 import '../../widgets/layout.dart';
 import '../../widgets/pin_widgets.dart';
 
-/// 03 · Activation · choix du PIN, suivi d'une confirmation (écran ajouté).
+/// Étapes du parcours PIN.
+enum _PinPhase { verifyCurrent, choose, confirm }
+
+/// 03 · Activation · choix du PIN, ou changement depuis le profil (vérif. d’abord).
 class PinCreateController extends GetxController {
   final entry = ''.obs;
-  final confirming = false.obs;
+  final phase = _PinPhase.choose.obs;
   final shake = 0.obs;
-  final mismatch = false.obs;
+  final error = false.obs;
   String _first = '';
 
   /// Ouvert depuis le profil (« Changer mon code PIN ») plutôt qu'à l'activation.
   final bool isChange = Get.arguments == 'change';
 
+  @override
+  void onInit() {
+    super.onInit();
+    if (isChange) phase.value = _PinPhase.verifyCurrent;
+  }
+
   void digit(String d) {
     if (entry.value.length >= 4) return;
-    mismatch.value = false;
+    error.value = false;
     entry.value += d;
-    if (entry.value.length == 4)
+    if (entry.value.length == 4) {
       Future.delayed(const Duration(milliseconds: 260), _complete);
+    }
   }
 
   void backspace() {
-    if (entry.value.isNotEmpty)
+    if (entry.value.isNotEmpty) {
       entry.value = entry.value.substring(0, entry.value.length - 1);
+    }
   }
 
   void _complete() {
-    if (!confirming.value) {
-      _first = entry.value;
-      entry.value = '';
-      confirming.value = true;
-      return;
-    }
-    if (entry.value == _first) {
-      Get.find<SessionService>().pin.value = _first;
-      if (isChange) {
-        Get.back();
-        showToast('Code PIN modifié.', icon: Symbols.check_circle_rounded);
-      } else {
-        Get.offAllNamed(Routes.download);
-      }
-    } else {
-      mismatch.value = true;
-      shake.value++;
-      entry.value = '';
+    final session = Get.find<SessionService>();
+    switch (phase.value) {
+      case _PinPhase.verifyCurrent:
+        if (session.matchesPin(entry.value)) {
+          entry.value = '';
+          phase.value = _PinPhase.choose;
+        } else {
+          error.value = true;
+          shake.value++;
+          entry.value = '';
+        }
+      case _PinPhase.choose:
+        _first = entry.value;
+        entry.value = '';
+        phase.value = _PinPhase.confirm;
+      case _PinPhase.confirm:
+        if (entry.value == _first) {
+          session.pin.value = _first;
+          if (isChange) {
+            Get.back();
+            showToast('pin.changed'.tr, icon: Symbols.check_circle_rounded);
+          } else {
+            Get.offAllNamed(Routes.download);
+          }
+        } else {
+          error.value = true;
+          shake.value++;
+          entry.value = '';
+          phase.value = _PinPhase.choose;
+          _first = '';
+        }
     }
   }
 
   void back() {
-    if (confirming.value) {
-      confirming.value = false;
-      entry.value = '';
-      mismatch.value = false;
-    } else {
-      Get.back();
+    switch (phase.value) {
+      case _PinPhase.verifyCurrent:
+        Get.back();
+      case _PinPhase.choose:
+        if (isChange) {
+          phase.value = _PinPhase.verifyCurrent;
+          entry.value = '';
+          error.value = false;
+        } else {
+          Get.back();
+        }
+      case _PinPhase.confirm:
+        phase.value = _PinPhase.choose;
+        entry.value = '';
+        error.value = false;
+        _first = '';
     }
   }
+
+  String get title => switch (phase.value) {
+        _PinPhase.verifyCurrent => 'pin.current'.tr,
+        _PinPhase.choose => 'pin.choose'.tr,
+        _PinPhase.confirm => 'pin.confirm'.tr,
+      };
+
+  String get subtitle => switch (phase.value) {
+        _PinPhase.verifyCurrent =>
+          error.value ? 'pin.wrong'.tr : '4 chiffres',
+        _PinPhase.choose => '4 chiffres',
+        _PinPhase.confirm =>
+          error.value ? 'pin.mismatch'.tr : 'Retapez le même code',
+      };
 }
 
 class PinCreateView extends GetView<PinCreateController> {
@@ -98,8 +146,8 @@ class PinCreateView extends GetView<PinCreateController> {
                 ),
                 const SizedBox(height: 32),
                 Obx(() {
-                  final confirm = controller.confirming.value;
-                  final bad = controller.mismatch.value;
+                  final phase = controller.phase.value;
+                  final bad = controller.error.value;
                   return AnimatedSwitcher(
                     duration: Motion.medium,
                     transitionBuilder: (c, a) => FadeTransition(
@@ -112,51 +160,33 @@ class PinCreateView extends GetView<PinCreateController> {
                         child: c,
                       ),
                     ),
-                    child: Column(key: ValueKey('$confirm$bad'), children: [
-                      Text(
-                          confirm
-                              ? 'Confirmez le code PIN'
-                              : 'Choisissez un code PIN',
+                    child: Column(key: ValueKey('$phase$bad'), children: [
+                      Text(controller.title,
                           textAlign: TextAlign.center,
                           style: display(28, color: Colors.white)),
-                      const SizedBox(height: 6),
-                      Text(
-                        bad
-                            ? 'Les deux codes sont différents. Recommencez.'
-                            : confirm
-                                ? 'Tapez le même code une seconde fois'
-                                : '4 chiffres, faciles à retenir',
-                        style: jakarta(13,
-                            color: bad ? AppColors.coral : AppColors.white(.65),
-                            weight: bad ? FontWeight.w700 : FontWeight.w500),
-                      ),
+                      const SizedBox(height: 8),
+                      Text(controller.subtitle,
+                          textAlign: TextAlign.center,
+                          style: jakarta(13,
+                              color: bad
+                                  ? AppColors.coral
+                                  : AppColors.white(.65))),
                     ]),
                   );
                 }),
-                const SizedBox(height: 24),
+                const SizedBox(height: 28),
                 Obx(() => Shake(
-                    trigger: controller.shake.value,
-                    child: PinBoxes(length: controller.entry.value.length))),
+                      trigger: controller.shake.value,
+                      child: PinDots(
+                        length: controller.entry.value.length,
+                        error: controller.error.value,
+                      ),
+                    )),
                 const Spacer(),
                 PinKeypad(
-                    onDigit: controller.digit,
-                    onBackspace: controller.backspace),
-                const SizedBox(height: 12),
-                Obx(() => AnimatedOpacity(
-                      duration: Motion.medium,
-                      opacity: controller.confirming.value ? 1 : 0,
-                      child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Sym(Symbols.lock_rounded,
-                                size: 15, color: AppColors.lime),
-                            const SizedBox(width: 6),
-                            Text('Le code reste sur ce téléphone',
-                                style: jakarta(11,
-                                    weight: FontWeight.w600,
-                                    color: AppColors.white(.8))),
-                          ]),
-                    )),
+                  onDigit: controller.digit,
+                  onBackspace: controller.backspace,
+                ),
               ]),
             ),
           ),

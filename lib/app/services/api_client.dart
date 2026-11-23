@@ -3,11 +3,14 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
+import 'secure_storage.dart';
 import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
 
 import 'api_config.dart';
 import 'device_service.dart';
+import 'network_service.dart';
 import "package:flutter/foundation.dart";
 
 /// Erreur renvoyée par l'API (`{ code, message, details? }`) ou par le réseau (`NETWORK`).
@@ -24,7 +27,7 @@ class ApiException implements Exception {
   /// Message affichable à l'utilisateur, en français.
   String get userMessage => switch (code) {
         'NETWORK' => 'Pas de connexion. Vérifiez votre réseau et réessayez.',
-        'INVALID_CREDENTIALS' => 'E-mail ou mot de passe incorrect.',
+        'INVALID_CREDENTIALS' => 'Identifiants incorrects.',
         'OTP_INVALID' => 'Code incorrect. Vérifiez et réessayez.',
         'OTP_EXPIRED' => 'Ce code a expiré. Demandez-en un nouveau.',
         'OTP_ATTEMPTS' => 'Trop de tentatives. Demandez un nouveau code.',
@@ -41,6 +44,9 @@ class ApiException implements Exception {
         'UNAUTHORIZED' =>
           'Session expirée. Reconnectez-vous.',
         'FORBIDDEN' => "Vous n'avez pas accès à cette information.",
+        'NOT_FOUND' => message.isEmpty
+            ? 'Cette fonction n’est pas encore disponible sur le serveur.'
+            : message,
         'BAD_REQUEST' => message.isEmpty
             ? 'Vérifiez les informations saisies.'
             : 'Vérifiez les informations saisies : $message',
@@ -56,7 +62,7 @@ class ApiException implements Exception {
 class ApiClient extends GetxService {
   ApiClient({String? baseUrl, FlutterSecureStorage? storage})
       : _baseUrl = baseUrl ?? ApiConfig.baseUrl,
-        _storage = storage ?? const FlutterSecureStorage();
+        _storage = storage ?? appSecureStorage;
 
   static const _kAccess = 'access_token';
   static const _kRefresh = 'refresh_token';
@@ -176,6 +182,10 @@ class ApiClient extends GetxService {
   /// Envoi d'un fichier (multipart). Même renouvellement de session que [request].
   Future<dynamic> postFile(String path, String filePath,
       {String field = 'file'}) async {
+    if (Get.isRegistered<NetworkService>() &&
+        !Get.find<NetworkService>().online.value) {
+      throw const ApiException('NETWORK', 'Réseau indisponible');
+    }
     Future<http.Response> once() async {
       final req = http.MultipartRequest('POST', _uri(path))
         ..headers['Accept'] = 'application/json'
@@ -207,6 +217,11 @@ class ApiClient extends GetxService {
 
   Future<http.Response> _send(String method, String path,
       {Object? body, Map<String, dynamic>? query}) async {
+    // Simulation hors ligne (Profil › Réseau) : aucune requête réseau.
+    if (Get.isRegistered<NetworkService>() &&
+        !Get.find<NetworkService>().online.value) {
+      throw const ApiException('NETWORK', 'Réseau indisponible');
+    }
     final req = http.Request(method, _uri(path, query))
       ..headers.addAll(_headers);
     if (body != null) req.body = jsonEncode(body);
@@ -217,7 +232,14 @@ class ApiClient extends GetxService {
       throw const ApiException('NETWORK', 'Délai dépassé');
     } on SocketException {
       throw const ApiException('NETWORK', 'Réseau indisponible');
-    } on http.ClientException {
+    } on http.ClientException catch (e) {
+      final m = e.message;
+      // macOS / certains clients : « Cannot POST /v1/… » quand la route n’existe pas.
+      if (m.toLowerCase().contains('cannot post') ||
+          m.toLowerCase().contains('cannot get') ||
+          m.contains('/auth/producer')) {
+        throw ApiException('NOT_FOUND', m, status: 404);
+      }
       throw const ApiException('NETWORK', 'Réseau indisponible');
     }
   }
@@ -287,9 +309,18 @@ class ApiClient extends GetxService {
     }
     if (res.statusCode >= 200 && res.statusCode < 300) return data;
     if (data is Map && data['code'] is String) {
-      throw ApiException(
-          data['code'] as String, (data['message'] ?? '').toString(),
-          status: res.statusCode, details: data['details']);
+      // Préférer le code métier dans `details` (ex. INVALID_CREDENTIALS sous
+      // un UNAUTHORIZED 401) pour afficher le bon message à l'utilisateur.
+      final details = data['details'];
+      final nested = details is Map ? details['code'] : null;
+      final code = (nested is String && nested.isNotEmpty)
+          ? nested
+          : data['code'] as String;
+      final message = (details is Map && details['message'] != null)
+          ? details['message'].toString()
+          : (data['message'] ?? '').toString();
+      throw ApiException(code, message,
+          status: res.statusCode, details: details);
     }
     throw ApiException('HTTP_${res.statusCode}', '', status: res.statusCode);
   }

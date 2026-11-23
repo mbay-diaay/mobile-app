@@ -1,4 +1,8 @@
-import 'package:flutter/widgets.dart' show IconData;
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart' show Color, IconData;
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:get/get.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -6,10 +10,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../core/app_colors.dart';
 import '../data/crop_catalog.dart';
 import '../data/mock_data.dart';
-import 'auth_service.dart';
+import '../data/local/app_database.dart';
 import 'api_client.dart';
+import 'auth_service.dart';
 import 'producer_repository.dart';
-import "package:flutter/foundation.dart";
+import 'secure_storage.dart';
+
+/// Profil choisi à l’ouverture de l’app (une seule appli, deux parcours).
+enum AppRole { technician, producer }
 
 /// Technicien connecté (profil renvoyé par l'API).
 class TestAccount {
@@ -55,17 +63,23 @@ class SessionService extends GetxService {
   /// Téléphone activé (étapes 01 à 04 terminées) : le démarrage mène au PIN.
   final activated = false.obs;
 
+  /// Rôle d’entrée : technicien ou producteur (null = écran de choix).
+  final appRole = Rxn<AppRole>();
+
   static const _kActivated = 'activated';
+  static const _kAppRole = 'app_role';
   static const _kEmail = 'account_email';
   static const _kName = 'account_name';
   static const _kScoop = 'account_scoop';
   static const _kPin = 'pin';
   late final SharedPreferences _prefs;
+  final FlutterSecureStorage _secure = appSecureStorage;
 
-  /// Relit l'activation enregistrée, puis enregistre chaque changement de compte ou de PIN.
+  /// Relit l'activation enregistrée ; le PIN est dans le trousseau, jamais en clair.
   Future<SessionService> init() async {
     _prefs = await SharedPreferences.getInstance();
     activated.value = _prefs.getBool(_kActivated) ?? false;
+    appRole.value = _parseAppRole(_prefs.getString(_kAppRole));
     final email = _prefs.getString(_kEmail);
     if (email != null) {
       account.value = TestAccount.fromUser(
@@ -76,63 +90,153 @@ class SessionService extends GetxService {
               role: ''),
           scoop: _prefs.getString(_kScoop) ?? '');
     }
-    pin.value = _prefs.getString(_kPin) ?? defaultPin;
-    ever(pin, (p) => _prefs.setString(_kPin, p));
+    pin.value = await _loadPin();
+    ever(pin, (p) {
+      unawaited(_secure.write(key: _kPin, value: p));
+    });
     return this;
   }
 
+  /// Migre un ancien PIN SharedPreferences vers le trousseau, puis le supprime.
+  Future<String> _loadPin() async {
+    try {
+      final secure = await _secure.read(key: _kPin);
+      if (secure != null && secure.isNotEmpty) return secure;
+    } catch (e) {
+      debugPrint('[ERROR][SessionService._loadPin] $e');
+    }
+    final legacy = _prefs.getString(_kPin);
+    if (legacy != null && legacy.isNotEmpty) {
+      try {
+        await _secure.write(key: _kPin, value: legacy);
+      } catch (e) {
+        debugPrint('[ERROR][SessionService._loadPin.migrate] $e');
+      }
+      await _prefs.remove(_kPin);
+      return legacy;
+    }
+    return defaultPin;
+  }
+
+  AppRole? _parseAppRole(String? raw) => switch (raw) {
+        'technician' => AppRole.technician,
+        'producer' => AppRole.producer,
+        _ => null,
+      };
+
+  Future<void> setAppRole(AppRole role) async {
+    appRole.value = role;
+    await _prefs.setString(
+        _kAppRole, role == AppRole.technician ? 'technician' : 'producer');
+  }
+
+  Future<void> clearAppRole() async {
+    appRole.value = null;
+    await _prefs.remove(_kAppRole);
+  }
+
   /// Fin de l'activation (écran 04).
-  void completeActivation() {
+  Future<void> completeActivation() async {
     activated.value = true;
-    _prefs
-      ..setBool(_kActivated, true)
-      ..setString(_kEmail, account.value.email)
-      ..setString(_kName, account.value.fullName)
-      ..setString(_kScoop, account.value.scoop)
-      ..setString(_kPin, pin.value);
+    // Activation = parcours technicien ; verrouille le rôle pour le prochain démarrage.
+    if (appRole.value != AppRole.technician) {
+      await setAppRole(AppRole.technician);
+    }
+    await _prefs.setBool(_kActivated, true);
+    await _prefs.setString(_kEmail, account.value.email);
+    await _prefs.setString(_kName, account.value.fullName);
+    await _prefs.setString(_kScoop, account.value.scoop);
+    try {
+      await _secure.write(key: _kPin, value: pin.value);
+    } catch (e) {
+      debugPrint('[ERROR][SessionService.completeActivation] $e');
+    }
+    await _prefs.remove(_kPin);
   }
 
   /// Révocation (écran 25) : le prochain démarrage repasse par l'activation.
-  void revoke() {
-    if (Get.isRegistered<AuthService>()) Get.find<AuthService>().logout();
+  Future<void> revoke() async {
+    if (Get.isRegistered<AuthService>()) {
+      unawaited(Get.find<AuthService>().logout());
+    }
     if (Get.isRegistered<ProducerRepository>()) {
       Get.find<ProducerRepository>().clearCache();
+    }
+    if (Get.isRegistered<AppDatabase>()) {
+      unawaited(Get.find<AppDatabase>().clearAll());
     }
     activated.value = false;
     failedAttempts.value = 0;
     pin.value = defaultPin;
+    permissions.clear();
     // Rien de l'utilisateur précédent ne doit rester affiché.
     producers.clear();
     recent.clear();
     plots.clear();
     cropPlans.clear();
-    _prefs
-      ..remove(_kActivated)
-      ..remove(_kEmail)
-      ..remove(_kName)
-      ..remove(_kScoop)
-      ..remove(_kPin);
+    await _prefs.remove(_kActivated);
+    await _prefs.remove(_kAppRole);
+    appRole.value = null;
+    await _prefs.remove(_kEmail);
+    await _prefs.remove(_kName);
+    await _prefs.remove(_kScoop);
+    await _prefs.remove(_kPin);
+    try {
+      await _secure.delete(key: _kPin);
+    } catch (e) {
+      debugPrint('[ERROR][SessionService.revoke] $e');
+    }
   }
 
-  final producers = <Producer>[...MockData.producers].obs;
-  final recent = <Producer>[...MockData.recent].obs;
+  /// Annuaire : vide au boot ; rempli par l’API / cache, ou par [loadDemoCatalog] (seed local).
+  final producers = <Producer>[].obs;
+  final recent = <Producer>[].obs;
   final plots = <String, List<Plot>>{}.obs; // clé : code producteur
 
   /// Cultures déclarées par parcelle (clé : code parcelle) et par saison
   /// (0 = campagne horticole, 1 = contre-saison). Gardées en mémoire, hors ligne.
   final cropPlans = <String, Map<int, List<Crop>>>{}.obs;
-  final toFix = <SyncIssue>[...MockData.syncIssues].obs;
-  final pending = <PendingItem>[...MockData.pending].obs;
-  final todoCount = 8.obs;
+  final toFix = <SyncIssue>[].obs;
+  final pending = <PendingItem>[].obs;
+  final todoCount = 0.obs;
 
-  final createdToday = 4.obs;
-  final surveyedToday = 1.obs;
+  final createdToday = 0.obs;
+  final surveyedToday = 0.obs;
   final cropsToday = 0.obs;
+
+  /// Catalogue de démonstration (seed local Fatou Sarr) — pas au cold start API.
+  void loadDemoCatalog() {
+    producers.assignAll(MockData.producers);
+    recent.assignAll(MockData.recent);
+    toFix.assignAll(MockData.syncIssues);
+    pending.assignAll(MockData.pending);
+    todoCount.value = 8;
+    createdToday.value = 4;
+    surveyedToday.value = 1;
+    cropsToday.value = 0;
+  }
 
   int _nextProducer = 20;
   int _nextPlot = 35;
 
-  void signIn(TestAccount a) => account.value = a;
+  /// Permissions du technicien (copie de `GET /me`), pour les gardes UI.
+  final permissions = <String>[].obs;
+
+  bool can(String permission) => permissions.contains(permission);
+
+  void signIn(TestAccount a, {List<String> permissions = const []}) {
+    account.value = a;
+    this.permissions.assignAll(permissions);
+  }
+
+  /// Recharge le profil API après reconnexion (même compte, données locales gardées).
+  Future<void> refreshMe() async {
+    final me = await Get.find<AuthService>().me();
+    signIn(
+      TestAccount.fromUser(me, scoop: me.scoopName ?? ''),
+      permissions: me.permissions,
+    );
+  }
 
   /// Annuaire du cache local (instantané, fonctionne hors ligne).
   Future<void> restoreProducers() async {
@@ -151,11 +255,16 @@ class SessionService extends GetxService {
     }
   }
 
-  /// Remplace l'annuaire de démonstration par celui de l'API ; les fiches créées sur
-  /// cet appareil (pas encore envoyées) restent en tête.
+  /// Remplace l'annuaire par celui de l'API / cache ; les fiches locales non sync
+  /// restent en tête. Liste serveur vide → on ne réinjecte pas MockData.
   void applyServerProducers(List<Producer> server) {
-    if (server.isEmpty) return;
     final local = producers.where((p) => p.isNew).toList();
+    if (server.isEmpty) {
+      if (local.isEmpty) return;
+      producers.assignAll(local);
+      recent.assignAll(local.take(3));
+      return;
+    }
     final archived = {
       for (final p in producers.where((p) => p.archived)) p.code
     };
@@ -176,6 +285,9 @@ class SessionService extends GetxService {
     return false;
   }
 
+  /// Vérifie le PIN sans compter d’échec (changement de PIN depuis le profil).
+  bool matchesPin(String value) => value == pin.value;
+
   bool get locked => failedAttempts.value >= maxAttempts;
 
   void visit(Producer p) {
@@ -184,6 +296,7 @@ class SessionService extends GetxService {
     if (recent.length > 3) recent.removeRange(3, recent.length);
   }
 
+  /// [queueRemote] : false si l’écran a déjà géré API ou outbox (évite un double envoi).
   Producer addProducer({
     required String first,
     required String last,
@@ -196,6 +309,7 @@ class SessionService extends GetxService {
     String? code,
     String? remoteId,
     bool synced = false,
+    bool queueRemote = true,
   }) {
     final p = Producer(
       initials: '${first[0]}${last[0]}'.toUpperCase(),
@@ -214,11 +328,11 @@ class SessionService extends GetxService {
     producers.insert(0, p);
     visit(p);
     createdToday.value++;
-    // Déjà créée sur le serveur par l'écran : rien à renvoyer (évite un doublon).
+    // Déjà créée sur le serveur / outbox par l'écran : rien à renvoyer.
     if (!synced) {
       pending.add(PendingItem(
           Symbols.person_add_rounded, 'Nouvelle fiche · ${p.name}'));
-      _pushCreate(p, first, last);
+      if (queueRemote) unawaited(_pushCreate(p, first, last));
     }
     if (cniPhotos && !synced)
       pending.add(
@@ -460,6 +574,32 @@ class SessionService extends GetxService {
       pending.add(PendingItem(
           Symbols.pentagon_rounded, 'Parcelle relevée · ${plot.code}'));
     }
+  }
+
+  /// MO-25 : valide ou renvoie une géométrie (nouvelle version logique côté client).
+  void setPlotStatus(
+    Producer owner,
+    Plot plot, {
+    required String status,
+    required Color statusBg,
+    required Color statusInk,
+    String? motif,
+  }) {
+    final list = [...plotsOf(owner)];
+    final i = list.indexWhere((x) => x.code == plot.code);
+    if (i < 0) return;
+    list[i] = plot.copyWith(
+        status: status, statusBg: statusBg, statusInk: statusInk);
+    plots[owner.code] = list;
+    final label = motif == null || motif.isEmpty
+        ? 'Géométrie · $status · ${plot.code}'
+        : 'Géométrie · $status · ${plot.code} · $motif';
+    pending.add(PendingItem(Symbols.verified_rounded, label));
+  }
+
+  /// File d'attente locale : vente ou charge (M2/M3, saisie rapide).
+  void queueCommerce(IconData icon, String label) {
+    pending.add(PendingItem(icon, label));
   }
 
   /// Envoie la parcelle : un nom, la surface en hectares et le point central.

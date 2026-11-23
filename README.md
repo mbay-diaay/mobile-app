@@ -2,11 +2,13 @@
 
 Application Flutter + GetX tirée de la maquette **Mbay Diaay Mobile v2** (Claude Design) : vert forêt, accent citron, fond crème, gros chiffres, cartes très arrondies, et des animations très expressives entre les écrans et les éléments.
 
-C'est un **prototype hors ligne** (données mock en mémoire). La connexion se fait par téléphone + code à 5 chiffres (première fois) puis téléphone + mot de passe ; voir `docs/AUTHENTIFICATION_TECHNICIEN.md`.
+Application **technicien** (Phase 2 L3–L4). Auth : téléphone + code à 5 chiffres (1ʳᵉ fois) puis téléphone + mot de passe — [`docs/AUTHENTIFICATION_TECHNICIEN.md`](docs/AUTHENTIFICATION_TECHNICIEN.md), calendrier [`docs/PHASE2.md`](docs/PHASE2.md).
 
-**Créer un producteur sur le serveur** : Profil → « Session API (technicien) » (ex. `fatou.sarr@cradesc.example` / `Demonstration2026` / OTP `000000`) → Producteurs → Nouveau. Si la session API est ouverte et le réseau simulé « Connecté », la fiche part en `POST /v1/producers` (sinon elle reste en attente locale).
+L’app **producteur** (inscription / connexion) sera un **autre dépôt**.
 
-Revue technique : [`docs/REVUE_PROTOTYPE_CLEMENT.md`](docs/REVUE_PROTOTYPE_CLEMENT.md).
+Données métier encore en partie mock / mémoire ; l’API prod (`https://api.mbaydiaay.com/v1`) est déjà branchée pour auth, `/me`, appareils et producteurs. Compte e-mail de test (OTP) reste disponible sous « Compte e-mail (test) » uniquement.
+
+Revue technique initiale : [`docs/REVUE_PROTOTYPE_CLEMENT.md`](docs/REVUE_PROTOTYPE_CLEMENT.md).
 
 ## Lancer
 
@@ -46,7 +48,7 @@ Démarrage ─► 01 Connexion (téléphone + code 5 chiffres / mot de passe) �
    Profil ─► Changer le PIN · Espace producteur 23 · Verrouiller (05) · Révocation 25 ─► 01
 ```
 
-Les écrans 01 à 25 suivent la maquette. Le chat de conception prévoyait d'ajouter le démarrage, la confirmation du PIN, les onglets Parcelles et Alertes de la fiche, la correction d'une erreur et l'écran de réussite ; ils sont tous là.
+Les écrans 01 à 25 suivent la maquette. Compléments PRD : validation géométrie (MO-25), calendrier cultural (MO-33), demande de correction (MO-61), saisies rapides vente/charge (§3.8). Inventaire : [`docs/ECRANS.md`](docs/ECRANS.md).
 
 
 ## Données créées

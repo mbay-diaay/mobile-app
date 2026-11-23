@@ -6,6 +6,7 @@ import '../../core/app_colors.dart';
 import '../../core/app_text.dart';
 import '../../core/app_theme.dart';
 import '../../routes/app_routes.dart';
+import '../../services/api_client.dart';
 import '../../services/session_service.dart';
 import '../../widgets/animations.dart';
 import '../../widgets/layout.dart';
@@ -15,10 +16,27 @@ class SplashController extends GetxController {
   @override
   void onReady() {
     super.onReady();
-    // Téléphone déjà activé : on va droit au PIN, sans refaire l'activation.
-    final activated = Get.find<SessionService>().activated.value;
-    Future.delayed(const Duration(milliseconds: 2600),
-        () => Get.offAllNamed(activated ? Routes.unlock : Routes.phone));
+    final session = Get.find<SessionService>();
+    Future.delayed(const Duration(milliseconds: 2600), () {
+      final role = session.appRole.value;
+      // Producteur d’abord : jamais le PIN technicien, même si activated est vrai.
+      if (role == AppRole.producer) {
+        final hasSession = Get.isRegistered<ApiClient>() &&
+            Get.find<ApiClient>().accessToken != null;
+        Get.offAllNamed(
+            hasSession ? Routes.producerHome : Routes.producerWelcome);
+        return;
+      }
+      if (session.activated.value) {
+        Get.offAllNamed(Routes.unlock);
+        return;
+      }
+      if (role == AppRole.technician) {
+        Get.offAllNamed(Routes.phone);
+        return;
+      }
+      Get.offAllNamed(Routes.roleGate);
+    });
   }
 }
 
@@ -105,7 +123,7 @@ class SplashView extends GetView<SplashController> {
                 child: Column(children: [
                   const _LoadingBar(),
                   const SizedBox(height: 14),
-                  Text('TECHNICIEN · v0.1.0',
+                  Text('MBAY DIAAY · v0.1.0',
                       style: mono(10,
                           weight: FontWeight.w700, color: AppColors.lime)),
                 ]),

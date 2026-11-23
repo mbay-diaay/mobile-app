@@ -38,8 +38,8 @@ class DownloadController extends GetxController
       ((progress.value - a) / (b - a)).clamp(0, 1);
 
   /// Le déverrouillage arrive de la droite et pousse cette page vers la gauche.
-  void finish() {
-    Get.find<SessionService>().completeActivation();
+  Future<void> finish() async {
+    await Get.find<SessionService>().completeActivation();
     Get.offAll(
       () => const UnlockView(),
       routeName: Routes.unlock,

@@ -1,5 +1,6 @@
 abstract final class Routes {
   static const splash = '/';
+  static const roleGate = '/role';
   static const phone = '/activation/phone';
   static const smsCode = '/activation/code';
   static const pinCreate = '/activation/pin';
@@ -11,10 +12,19 @@ abstract final class Routes {
   static const producer = '/producer';
   static const newProducer = '/producer/new';
   static const producerSpace = '/producer/space';
+  static const producerWelcome = '/producer-app/welcome';
+  static const producerLogin = '/producer-app/login';
+  static const producerRegister = '/producer-app/register';
+  static const producerHome = '/producer-app/home';
   static const survey = '/survey';
   static const surveyDone = '/survey/done';
+  static const plotValidate = '/survey/validate';
   static const crops = '/crops';
+  static const cropCalendar = '/crops/calendar';
   static const sync = '/sync';
   static const fix = '/sync/fix';
   static const success = '/success';
+  static const correctionRequest = '/producer/correction';
+  static const quickSale = '/commerce/sale';
+  static const quickExpense = '/commerce/expense';
 }

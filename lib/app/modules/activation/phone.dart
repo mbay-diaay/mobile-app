@@ -86,6 +86,8 @@ class PhoneController extends GetxController {
   void setMode(LoginMode next) {
     if (mode.value == next) return;
     mode.value = next;
+    // Changer de mode = nouvelle tentative, plus un état « reconnexion ».
+    reconnect = false;
     error.value = null;
     revision.value++;
   }
@@ -104,6 +106,31 @@ class PhoneController extends GetxController {
   void _fail(String message) {
     error.value = message;
     shake.value++;
+  }
+
+  /// Accès seed local (sans API) pour explorer l’app tant que la prod refuse les comptes démo.
+  Future<void> enterLocalSeed() async {
+    _unfocusAll();
+    final session = Get.find<SessionService>();
+    await session.setAppRole(AppRole.technician);
+    session.signIn(
+      const TestAccount(
+        'fatou.sarr@cradesc.example',
+        'Fatou',
+        'Fatou Sarr',
+        'FS',
+        'SCOOP Démo Niayes',
+      ),
+      permissions: const [
+        'producer.read',
+        'producer.edit',
+        'dashboard.read',
+      ],
+    );
+    session.pin.value = SessionService.defaultPin;
+    session.loadDemoCatalog();
+    await session.completeActivation();
+    Get.offAllNamed(Routes.shell);
   }
 
   Future<void> submit() async {
@@ -134,10 +161,11 @@ class PhoneController extends GetxController {
     final me = await auth.me();
     if (me.role != AuthUser.technicianRole) {
       await Get.find<ApiClient>().clearTokens();
-      _fail('Cette application est réservée aux techniciens.');
+      _fail('Ce parcours est réservé aux techniciens. Choisissez « Producteur » au démarrage.');
       return;
     }
     final session = Get.find<SessionService>();
+    await session.setAppRole(AppRole.technician);
     if (reconnect) {
       if (session.activated.value && me.email == session.account.value.email) {
         await session.refreshMe();
@@ -146,7 +174,7 @@ class PhoneController extends GetxController {
       }
       // Autre technicien : on ferme sa session et on vide le téléphone avant tout nouvel accès.
       await auth.logout();
-      session.revoke();
+      await session.revoke();
       reconnect = false;
       password.clear();
       revision.value++;
@@ -235,13 +263,6 @@ class PhoneView extends GetView<PhoneController> {
                           style: display(30, color: Colors.white))),
                     ),
                     const SizedBox(height: 8),
-                    FadeSlideIn(
-                      delay: const Duration(milliseconds: 240),
-                      child: Text('Wolof · traduction à venir',
-                          style: jakarta(12,
-                              style: FontStyle.italic,
-                              color: AppColors.white(.6))),
-                    ),
                   ]),
             ),
           ),
@@ -353,7 +374,7 @@ class PhoneView extends GetView<PhoneController> {
                             message: controller.error.value,
                             hint: _hint(mode)),
                         const Spacer(),
-                        if (!controller.reconnect)
+                        if (!controller.reconnect) ...[
                           Center(
                             child: TextButton(
                               onPressed: () => controller.setMode(
@@ -369,6 +390,17 @@ class PhoneView extends GetView<PhoneController> {
                                       color: AppColors.muted)),
                             ),
                           ),
+                          Center(
+                            child: TextButton(
+                              onPressed: controller.enterLocalSeed,
+                              child: Text(
+                                  'Accès seed local · Fatou Sarr (PIN 1234)',
+                                  style: jakarta(12,
+                                      weight: FontWeight.w700,
+                                      color: AppColors.forest)),
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 8),
                         FadeSlideIn(
                           delay: const Duration(milliseconds: 600),

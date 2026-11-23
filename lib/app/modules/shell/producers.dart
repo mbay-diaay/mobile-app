@@ -17,6 +17,7 @@ import 'shell.dart';
 class ProducersController extends GetxController {
   final session = Get.find<SessionService>();
   final query = ''.obs;
+  final searchCtrl = TextEditingController();
 
   /// Vue des fiches archivées (restaurables) au lieu des fiches actives.
   final showArchived = false.obs;
@@ -25,18 +26,45 @@ class ProducersController extends GetxController {
   int get total =>
       212 + session.activeProducers.length - MockData.producers.length;
 
+  @override
+  void onClose() {
+    searchCtrl.dispose();
+    super.onClose();
+  }
+
+  void clearQuery() {
+    searchCtrl.clear();
+    query.value = '';
+  }
+
+  static String _norm(String s) => s
+      .toLowerCase()
+      .replaceAll(RegExp(r'\s+'), '')
+      .replaceAll(RegExp(r'[éèêë]'), 'e')
+      .replaceAll(RegExp(r'[àâä]'), 'a')
+      .replaceAll(RegExp(r'[ôö]'), 'o')
+      .replaceAll(RegExp(r'[ùûü]'), 'u')
+      .replaceAll(RegExp(r'[îï]'), 'i')
+      .replaceAll('ç', 'c');
+
   List<Producer> get results {
-    final q = query.value.trim().toLowerCase();
+    final raw = query.value.trim();
+    final q = _norm(raw);
+    final digits = raw.replaceAll(RegExp(r'\D'), '');
     final all = showArchived.value
         ? session.archivedProducers
         : session.activeProducers;
-    if (q.isEmpty) return all;
-    return all
-        .where((p) =>
-            p.name.toLowerCase().contains(q) ||
-            p.village.toLowerCase().contains(q) ||
-            p.phone.replaceAll(' ', '').contains(q))
-        .toList();
+    if (q.isEmpty && digits.isEmpty) return all;
+    return all.where((p) {
+      final name = _norm(p.name);
+      final village = _norm(p.village);
+      final code = _norm(p.code);
+      final phone = p.phone.replaceAll(RegExp(r'\D'), '');
+      final hitText = q.isNotEmpty &&
+          (name.contains(q) || village.contains(q) || code.contains(q));
+      final hitPhone = digits.isNotEmpty && phone.contains(digits);
+      return hitText || hitPhone;
+    }).toList();
   }
 }
 
@@ -52,7 +80,8 @@ class ProducersTab extends GetView<ProducersController> {
         DarkHeader(
           child:
               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Producteurs', style: display(26, color: Colors.white)),
+            Text('producers.title'.tr,
+                style: display(26, color: Colors.white)),
             const SizedBox(height: 12),
             Container(
               height: 50,
@@ -64,35 +93,40 @@ class ProducersTab extends GetView<ProducersController> {
                 const SizedBox(width: 10),
                 Expanded(
                   child: TextField(
+                    controller: controller.searchCtrl,
                     onChanged: (v) => controller.query.value = v,
                     style: jakarta(14, weight: FontWeight.w600),
                     decoration: InputDecoration(
                       border: InputBorder.none,
                       isCollapsed: true,
-                      hintText: 'Nom, village ou téléphone',
+                      hintText: 'producers.search'.tr,
                       hintStyle: jakarta(14, color: AppColors.muted),
                     ),
                   ),
                 ),
+                Obx(() => controller.query.value.isEmpty
+                    ? const SizedBox.shrink()
+                    : GestureDetector(
+                        onTap: controller.clearQuery,
+                        child: const Sym(Symbols.close_rounded,
+                            size: 20, color: AppColors.muted),
+                      )),
               ]),
             ),
             const SizedBox(height: 12),
             Obx(() => controller.showArchived.value
-                ? Text('Fiches archivées · touchez une fiche pour la restaurer',
+                ? Text('producers.archived'.tr,
                     style: jakarta(11,
                         weight: FontWeight.w600, color: AppColors.white(.65)))
-                : Text.rich(TextSpan(
-                    style: jakarta(11, color: AppColors.white(.65)),
-                    children: [
-                        TextSpan(
-                            text: '${controller.total}',
-                            style: jakarta(11,
-                                weight: FontWeight.w800,
-                                color: AppColors.lime)),
-                        TextSpan(text: ' producteurs · SCOOP ${s.scoop}'),
-                      ]))),
-            // Raccourcis sous le décompte : fiches à corriger, et accès aux fiches archivées
-            // (seulement s'il y en a, ou si on les consulte).
+                : Text(
+                    'producers.count'.trParams({
+                      'count': '${controller.results.length}',
+                      'scoop': s.scoop,
+                    }),
+                    style: jakarta(11,
+                        weight: FontWeight.w600,
+                        color: AppColors.white(.65)),
+                  )),
             Obx(() {
               final fix = s.toFix.length;
               final n = s.archivedProducers.length;
@@ -103,12 +137,16 @@ class ProducersTab extends GetView<ProducersController> {
                 child: Wrap(spacing: 6, runSpacing: 6, children: [
                   if (fix > 0)
                     Chip2(
-                        label: '$fix à corriger',
+                        label: 'producers.fix'
+                            .trParams({'count': '$fix'}),
                         icon: Symbols.error_rounded,
                         onTap: () => Get.toNamed(Routes.sync)),
                   if (n > 0 || on)
                     Chip2(
-                      label: on ? 'Retour aux fiches' : 'Archivées · $n',
+                      label: on
+                          ? 'producers.backList'.tr
+                          : 'producers.archivedChip'
+                              .trParams({'count': '$n'}),
                       icon: on
                           ? Symbols.arrow_back_rounded
                           : Symbols.inventory_2_rounded,
@@ -134,13 +172,13 @@ class ProducersTab extends GetView<ProducersController> {
                     const SizedBox(height: 12),
                     Text(
                         controller.showArchived.value
-                            ? 'Aucune fiche archivée'
-                            : 'Aucun producteur trouvé',
+                            ? 'producers.noneArchived'.tr
+                            : 'producers.empty'.tr,
                         style: jakarta(15, weight: FontWeight.w800)),
                     Text(
                         controller.showArchived.value
-                            ? 'Les fiches archivées apparaissent ici.'
-                            : 'Vérifiez l\'orthographe ou créez une fiche.',
+                            ? 'producers.noneArchivedHint'.tr
+                            : 'producers.emptyHint'.tr,
                         style: jakarta(12, color: AppColors.muted)),
                   ]),
                 ),
@@ -239,25 +277,27 @@ class ProducerRow extends StatelessWidget {
                   ]),
             ),
             if (p.archived)
-              const Padding(
-                padding: EdgeInsets.only(right: 4),
+              Padding(
+                padding: const EdgeInsets.only(right: 4),
                 child: Chip2(
-                    label: 'Archivée',
+                    label: 'producers.chipArchived'.tr,
                     icon: Symbols.inventory_2_rounded,
                     bg: AppColors.sand,
                     fg: AppColors.muted,
                     size: 10,
-                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 3)),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 3)),
               )
             else if (p.isNew)
-              const Padding(
-                padding: EdgeInsets.only(right: 4),
+              Padding(
+                padding: const EdgeInsets.only(right: 4),
                 child: Chip2(
-                    label: 'Nouveau',
+                    label: 'producers.chipNew'.tr,
                     bg: AppColors.lime,
                     fg: AppColors.forest,
                     size: 10,
-                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 3)),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 3)),
               ),
             if (trailing != null)
               Padding(

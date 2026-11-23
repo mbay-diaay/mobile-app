@@ -91,7 +91,7 @@ class RevokedView extends StatelessWidget {
                   delay: const Duration(milliseconds: 500),
                   child: SwipeCta(
                     label: 'Glissez pour réactiver',
-                    onConfirm: () => Get.offAllNamed(Routes.phone),
+                    onConfirm: () => Get.offAllNamed(Routes.roleGate),
                   ),
                 ),
               ]),

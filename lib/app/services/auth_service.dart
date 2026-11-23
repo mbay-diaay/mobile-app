@@ -65,12 +65,16 @@ class AuthUser {
 
   bool can(String permission) => permissions.contains(permission);
 
-  /// Rôle exigé pour utiliser l'application mobile.
+  /// Rôle exigé pour le parcours technicien.
   static const technicianRole = 'technicien';
+
+  /// Rôle exigé pour le parcours producteur (même app).
+  static const producerRole = 'producteur';
 }
 
-/// Authentification mobile : sign-in (e-mail + mot de passe) → OTP → jetons → /me.
-/// Les erreurs sont des [ApiException] (messages français via `userMessage`).
+/// Authentification mobile technicien.
+/// Parcours principal : téléphone + code 5 chiffres (`activate`) ou téléphone + mot de passe (`sign-in`).
+/// Parcours test : e-mail + OTP. Erreurs : [ApiException] (`userMessage`).
 class AuthService extends GetxService {
   AuthService({ApiClient? client}) : _client = client ?? Get.find<ApiClient>() {
     device = DeviceService(_client);
@@ -120,6 +124,62 @@ class AuthService extends GetxService {
     final data = await _client.post('/auth/technician/sign-in',
         auth: false, body: {'phone': phone.trim(), 'password': password});
     return _keepSession(data as Map<String, dynamic>);
+  }
+
+  /// Inscription producteur (même app) — endpoints API encore à livrer.
+  Future<AuthUser> registerProducer({
+    required String phone,
+    required String password,
+    required String firstName,
+    required String lastName,
+    String? invitationCode,
+  }) async {
+    try {
+      final data = await _client.post(
+        '/auth/producer/register',
+        auth: false,
+        body: {
+          'phone': phone.trim(),
+          'password': password,
+          'firstName': firstName.trim(),
+          'lastName': lastName.trim(),
+          if (invitationCode != null && invitationCode.isNotEmpty)
+            'invitationCode': invitationCode.trim(),
+        },
+      );
+      return _keepSession(data as Map<String, dynamic>);
+    } on ApiException catch (e) {
+      throw _producerAuthUnavailable(e);
+    }
+  }
+
+  /// Connexion producteur : téléphone + mot de passe.
+  Future<AuthUser> signInProducer(
+      {required String phone, required String password}) async {
+    try {
+      final data = await _client.post('/auth/producer/sign-in',
+          auth: false, body: {'phone': phone.trim(), 'password': password});
+      return _keepSession(data as Map<String, dynamic>);
+    } on ApiException catch (e) {
+      throw _producerAuthUnavailable(e);
+    }
+  }
+
+  /// 404 / route absente → message clair (API producteur pas encore déployée).
+  ApiException _producerAuthUnavailable(ApiException e) {
+    final raw = e.message.toLowerCase();
+    if (e.status == 404 ||
+        e.code == 'NOT_FOUND' ||
+        raw.contains('cannot post') ||
+        raw.contains('/auth/producer') ||
+        raw.contains('not found')) {
+      return ApiException(
+        'NOT_FOUND',
+        'Compte producteur pas encore sur le serveur. Utilisez le seed Aïssa Diop (77 000 00 00).',
+        status: e.status ?? 404,
+      );
+    }
+    return e;
   }
 
   /// Conserve les jetons de la réponse et renvoie l'utilisateur.

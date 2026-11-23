@@ -8,6 +8,7 @@ import '../../core/app_theme.dart';
 import '../../data/mock_data.dart';
 import '../../routes/app_routes.dart';
 import '../../services/network_service.dart';
+import '../../services/outbox_service.dart';
 import '../../services/session_service.dart';
 import '../../widgets/animations.dart';
 import '../../widgets/buttons.dart';
@@ -41,8 +42,12 @@ class SyncController extends GetxController
     _maybeSend();
   }
 
-  void _maybeSend() {
+  Future<void> _maybeSend() async {
     if (net.online.value && session.pending.isNotEmpty && !send.isAnimating) {
+      // Synchro réelle : flush Drift outbox vers l’API, puis animation UI.
+      if (Get.isRegistered<OutboxService>()) {
+        await Get.find<OutboxService>().flush();
+      }
       Future.delayed(
           const Duration(milliseconds: 500), () => send.forward(from: 0));
     } else if (!net.online.value) {
@@ -117,13 +122,25 @@ class SyncView extends GetView<SyncController> {
                                   weight: FontWeight.w700,
                                   color: Colors.white))),
                       Chip2(
-                        label: online ? 'Réseau' : 'Hors ligne',
+                        label: online
+                            ? 'offline.networkOn'.tr
+                            : 'offline.network'.tr,
                         icon: online
                             ? Symbols.wifi_rounded
                             : Symbols.wifi_off_rounded,
                         bg: AppColors.white(.1),
                         fg: Colors.white,
-                        onTap: controller.net.toggle,
+                        onTap: () {
+                          controller.net.toggle();
+                          showToast(
+                            controller.net.online.value
+                                ? 'offline.toastOn'.tr
+                                : 'offline.toastOff'.tr,
+                            icon: controller.net.online.value
+                                ? Symbols.wifi_rounded
+                                : Symbols.wifi_off_rounded,
+                          );
+                        },
                       ),
                     ]),
                     const SizedBox(height: 14),

@@ -6,9 +6,11 @@ import '../../core/app_colors.dart';
 import '../../core/app_text.dart';
 import '../../core/app_theme.dart';
 import '../../data/mock_data.dart' show MockData;
+import '../../data/producer_seed.dart';
 import '../../routes/app_routes.dart';
 import '../../services/api_client.dart';
 import '../../services/auth_service.dart';
+import '../../services/locale_service.dart';
 import '../../services/network_service.dart';
 import '../../services/session_service.dart';
 import '../../widgets/animations.dart';
@@ -79,28 +81,48 @@ class ProfileTab extends StatelessWidget {
             _Group(children: [
               row(_Setting(
                 icon: Symbols.pin_rounded,
-                title: 'Changer mon code PIN',
+                title: 'profile.pin'.tr,
                 sub: '4 chiffres',
                 onTap: () => Get.toNamed(Routes.pinCreate, arguments: 'change'),
               )),
               row(_Setting(
                 icon: Symbols.translate_rounded,
-                title: 'Langue',
-                sub: 'Français · wolof bientôt',
-                onTap: () => showToast('Le wolof arrive bientôt.',
-                    icon: Symbols.translate_rounded),
+                title: 'profile.language'.tr,
+                subWidget: Obx(() {
+                  final loc = Get.find<LocaleService>();
+                  return Text(
+                    loc.label,
+                    style: jakarta(10, color: AppColors.muted),
+                  );
+                }),
+                onTap: () async {
+                  await Get.find<LocaleService>().toggle();
+                  showToast(
+                      '${'profile.language'.tr} · ${Get.find<LocaleService>().label}',
+                      icon: Symbols.translate_rounded);
+                },
               )),
               row(_Setting(
                 icon: Symbols.wifi_rounded,
-                title: 'Réseau (simulation)',
+                title: 'profile.network'.tr,
                 subWidget: Obx(() => Text(
                       net.online.value
-                          ? 'Connecté · touchez pour couper'
-                          : 'Coupé · touchez pour rétablir',
+                          ? 'profile.networkOn'.tr
+                          : 'profile.networkOff'.tr,
                       style: jakarta(10, color: AppColors.muted),
                     )),
                 trailing: Obx(() => _Toggle(value: net.online.value)),
-                onTap: net.toggle,
+                onTap: () {
+                  net.toggle();
+                  showToast(
+                    net.online.value
+                        ? 'offline.toastOn'.tr
+                        : 'offline.toastOff'.tr,
+                    icon: net.online.value
+                        ? Symbols.wifi_rounded
+                        : Symbols.wifi_off_rounded,
+                  );
+                },
               )),
               row(_Setting(
                 icon: Symbols.cloud_sync_rounded,
@@ -123,10 +145,34 @@ class ProfileTab extends StatelessWidget {
               row(_Setting(
                 icon: Symbols.visibility_rounded,
                 title: 'Aperçu espace producteur',
-                sub: 'Ce que voit un producteur',
+                sub: 'Maquette 23 · parcelles, calendrier, alertes',
                 bg: AppColors.blueSoft,
                 ink: AppColors.blueInk,
                 onTap: () => Get.toNamed(Routes.producerSpace),
+              )),
+              row(_Setting(
+                icon: Symbols.agriculture_rounded,
+                title: 'profile.producerPreview'.tr,
+                sub: 'profile.producerPreviewSub'.tr,
+                onTap: () => Get.toNamed(
+                  Routes.producerHome,
+                  arguments: AuthUser(
+                    id: 'seed-producer-push',
+                    email: ProducerSeed.user.email,
+                    name: ProducerSeed.user.name,
+                    role: AuthUser.producerRole,
+                    scoopName: ProducerSeed.user.scoopName,
+                  ),
+                ),
+              )),
+              row(_Setting(
+                icon: Symbols.swap_horiz_rounded,
+                title: 'profile.changeRole'.tr,
+                sub: 'profile.changeRoleSub'.tr,
+                onTap: () async {
+                  await Get.find<SessionService>().clearAppRole();
+                  Get.offAllNamed(Routes.roleGate);
+                },
               )),
               row(_Setting(
                 icon: Symbols.lock_rounded,
@@ -148,8 +194,8 @@ class ProfileTab extends StatelessWidget {
                     destructive: true,
                   );
                   if (!ok) return;
-                  Get.find<SessionService>().revoke();
-                  Get.offAllNamed(Routes.phone);
+                  await Get.find<SessionService>().revoke();
+                  Get.offAllNamed(Routes.roleGate);
                 },
               )),
               row(_Setting(
@@ -159,8 +205,8 @@ class ProfileTab extends StatelessWidget {
                 bg: AppColors.redSoft,
                 ink: AppColors.redInk,
                 last: true,
-                onTap: () {
-                  Get.find<SessionService>().revoke();
+                onTap: () async {
+                  await Get.find<SessionService>().revoke();
                   Get.offAllNamed(Routes.revoked);
                 },
               )),

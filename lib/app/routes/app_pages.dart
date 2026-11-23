@@ -4,16 +4,26 @@ import '../core/app_theme.dart';
 import '../modules/activation/download.dart';
 import '../modules/activation/phone.dart';
 import '../modules/activation/pin_create.dart';
+import '../modules/activation/role_gate.dart';
 import '../modules/activation/sms_code.dart';
 import '../modules/lock/blocked.dart';
 import '../modules/lock/revoked.dart';
 import '../modules/lock/unlock.dart';
+import '../modules/commerce/quick_expense.dart';
+import '../modules/commerce/quick_sale.dart';
+import '../modules/producer/correction_request.dart';
 import '../modules/producer/new_producer.dart';
 import '../modules/producer/producer_detail.dart';
 import '../modules/producer/producer_space.dart';
+import '../modules/producer_app/producer_home.dart';
+import '../modules/producer_app/producer_login.dart';
+import '../modules/producer_app/producer_register.dart';
+import '../modules/producer_app/producer_welcome.dart';
 import '../modules/shell/shell.dart';
 import '../modules/splash/splash.dart';
+import '../modules/survey/crop_calendar.dart';
 import '../modules/survey/crops.dart';
+import '../modules/survey/plot_validate.dart';
 import '../modules/survey/survey.dart';
 import '../modules/survey/survey_done.dart';
 import '../modules/sync/fix.dart';
@@ -31,11 +41,43 @@ abstract final class AppPages {
         page: () => const SplashView(),
         binding: BindingsBuilder.put(() => SplashController())),
     GetPage(
+      name: Routes.roleGate,
+      page: () => const RoleGateView(),
+      binding: BindingsBuilder.put(() => RoleGateController()),
+      transition: Transition.fadeIn,
+      transitionDuration: Motion.medium,
+    ),
+    GetPage(
       name: Routes.phone,
       page: () => const PhoneView(),
       binding: BindingsBuilder.put(() => PhoneController()),
       customTransition: SlidePushTransition(fadeIn: true),
       transitionDuration: Motion.slow,
+    ),
+    GetPage(
+      name: Routes.producerWelcome,
+      page: () => const ProducerWelcomeView(),
+      transition: Transition.fadeIn,
+      transitionDuration: Motion.medium,
+    ),
+    GetPage(
+      name: Routes.producerLogin,
+      page: () => const ProducerLoginView(),
+      binding: BindingsBuilder.put(() => ProducerLoginController()),
+      transition: Transition.downToUp,
+    ),
+    GetPage(
+      name: Routes.producerRegister,
+      page: () => const ProducerRegisterView(),
+      binding: BindingsBuilder.put(() => ProducerRegisterController()),
+      transition: Transition.downToUp,
+    ),
+    GetPage(
+      name: Routes.producerHome,
+      page: () => const ProducerHomeView(),
+      binding: BindingsBuilder.put(() => ProducerHomeController()),
+      transition: Transition.fadeIn,
+      transitionDuration: Motion.medium,
     ),
     GetPage(
       name: Routes.smsCode,
@@ -93,6 +135,12 @@ abstract final class AppPages {
     ),
     GetPage(name: Routes.producerSpace, page: () => const ProducerSpaceView()),
     GetPage(
+      name: Routes.correctionRequest,
+      page: () => const CorrectionRequestView(),
+      binding: BindingsBuilder.put(() => CorrectionRequestController()),
+      transition: Transition.downToUp,
+    ),
+    GetPage(
       name: Routes.survey,
       page: () => const SurveyView(),
       binding: BindingsBuilder.put(() => SurveyController()),
@@ -103,9 +151,31 @@ abstract final class AppPages {
         page: () => const SurveyDoneView(),
         transition: Transition.zoom),
     GetPage(
+      name: Routes.plotValidate,
+      page: () => const PlotValidateView(),
+      binding: BindingsBuilder.put(() => PlotValidateController()),
+      transition: Transition.downToUp,
+    ),
+    GetPage(
         name: Routes.crops,
         page: () => const CropsView(),
         binding: BindingsBuilder.put(() => CropsController())),
+    GetPage(
+        name: Routes.cropCalendar,
+        page: () => const CropCalendarView(),
+        transition: Transition.cupertino),
+    GetPage(
+      name: Routes.quickSale,
+      page: () => const QuickSaleView(),
+      binding: BindingsBuilder.put(() => QuickSaleController()),
+      transition: Transition.downToUp,
+    ),
+    GetPage(
+      name: Routes.quickExpense,
+      page: () => const QuickExpenseView(),
+      binding: BindingsBuilder.put(() => QuickExpenseController()),
+      transition: Transition.downToUp,
+    ),
     GetPage(
         name: Routes.sync,
         page: () => const SyncView(),

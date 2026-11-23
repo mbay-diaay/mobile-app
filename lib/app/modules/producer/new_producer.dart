@@ -12,6 +12,7 @@ import '../../core/app_theme.dart';
 import '../../data/mock_data.dart';
 import '../../routes/app_routes.dart';
 import '../../services/network_service.dart';
+import '../../services/outbox_service.dart';
 import '../../services/producers_service.dart';
 import '../../services/session_service.dart';
 import '../../widgets/animations.dart';
@@ -243,6 +244,15 @@ class NewProducerController extends GetxController {
           if (!sent) photoFailed = true;
         }
       }
+    } else if (Get.isRegistered<OutboxService>()) {
+      // Hors ligne : file Drift, envoi à la synchro (MO-40).
+      await Get.find<OutboxService>().enqueueProducerCreate({
+        'firstName': firstName,
+        'lastName': lastName,
+        'village': village.value,
+        'phone': phone.text,
+        if (cni.text.trim().isNotEmpty) 'cni': cni.text.trim(),
+      });
     }
 
     final p = Get.find<SessionService>().addProducer(
@@ -257,6 +267,8 @@ class NewProducerController extends GetxController {
       code: serverCode,
       remoteId: serverId,
       synced: synced,
+      // API ou outbox déjà gérés ci-dessus — pas de second POST.
+      queueRemote: false,
     );
     saving.value = false;
     Get.offNamed(Routes.success, arguments: {

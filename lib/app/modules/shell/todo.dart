@@ -25,7 +25,23 @@ class TodoController extends GetxController {
 
   void open(TodoItem t) {
     if (t.isPlot) {
-      Get.toNamed(Routes.survey);
+      final bits = t.subtitle.split(' · ');
+      final code = bits.first;
+      final ownerName = bits.length > 1 ? bits[1] : '';
+      final owner = MockData.producers
+              .firstWhereOrNull((p) => p.name == ownerName) ??
+          MockData.producers[5];
+      Get.toNamed(Routes.plotValidate, arguments: {
+        'owner': owner,
+        'plot': Plot(
+          code,
+          '—',
+          '—',
+          'À reprendre',
+          AppColors.amberSoft,
+          AppColors.amberInk,
+        ),
+      });
     } else {
       final name = t.subtitle.split(' · ').first;
       final p = MockData.producers.firstWhereOrNull((p) => p.name == name) ??

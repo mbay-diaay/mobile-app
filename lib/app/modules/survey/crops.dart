@@ -337,25 +337,10 @@ class CropsView extends GetView<CropsController> {
                     }),
                   ),
                   const SizedBox(height: 8),
-                  Obx(() => Pressable(
-                        onTap: controller.save,
-                        child: AnimatedContainer(
-                          duration: Motion.medium,
-                          height: 58,
-                          decoration: BoxDecoration(
-                            color: controller.valid
-                                ? AppColors.forest
-                                : AppColors.sand,
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          alignment: Alignment.center,
-                          child: Text('Enregistrer',
-                              style: jakarta(16,
-                                  weight: FontWeight.w800,
-                                  color: controller.valid
-                                      ? Colors.white
-                                      : AppColors.gray)),
-                        ),
+                  Obx(() => SwipeCta.dark(
+                        label: 'crops.save'.tr,
+                        busyLabel: 'common.busy'.tr,
+                        onConfirm: controller.valid ? controller.save : null,
                       )),
                 ]),
           ),
