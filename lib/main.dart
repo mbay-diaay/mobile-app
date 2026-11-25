@@ -10,6 +10,7 @@ import 'app/data/local/app_database.dart';
 import 'app/services/api_client.dart';
 import 'app/services/auth_service.dart';
 import 'app/services/locale_service.dart';
+import 'app/services/local_producer_auth.dart';
 import 'app/services/network_service.dart';
 import 'app/services/outbox_service.dart';
 import 'app/services/producer_repository.dart';
@@ -26,6 +27,7 @@ Future<void> main() async {
   await Get.putAsync(() => SessionService().init(), permanent: true);
   await Get.putAsync(() => ApiClient().init(), permanent: true);
   Get.put(AuthService(), permanent: true);
+  Get.put(LocalProducerAuth(), permanent: true);
   Get.put(ProducerRepository(), permanent: true);
   Get.put(ProducersService(), permanent: true);
   Get.put(OutboxService(), permanent: true);

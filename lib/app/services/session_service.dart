@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:drift/drift.dart' as drift;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart' show Color, IconData;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -73,8 +74,15 @@ class SessionService extends GetxService {
   static const _kName = 'account_name';
   static const _kScoop = 'account_scoop';
   static const _kPin = 'pin';
+  static const _kProdId = 'producer_user_id';
+  static const _kProdName = 'producer_user_name';
+  static const _kProdEmail = 'producer_user_email';
+  static const _kProdScoop = 'producer_user_scoop';
   late final SharedPreferences _prefs;
   final FlutterSecureStorage _secure = appSecureStorage;
+
+  /// Profil producteur persisté (cold start sans `Get.arguments`).
+  final producerUser = Rxn<AuthUser>();
 
   /// Relit l'activation enregistrée ; le PIN est dans le trousseau, jamais en clair.
   Future<SessionService> init() async {
@@ -91,11 +99,42 @@ class SessionService extends GetxService {
               role: ''),
           scoop: _prefs.getString(_kScoop) ?? '');
     }
+    final prodId = _prefs.getString(_kProdId);
+    if (prodId != null && prodId.isNotEmpty) {
+      producerUser.value = AuthUser(
+        id: prodId,
+        email: _prefs.getString(_kProdEmail) ?? '',
+        name: _prefs.getString(_kProdName) ?? 'Producteur',
+        role: AuthUser.producerRole,
+        scoopName: _prefs.getString(_kProdScoop),
+      );
+    }
     pin.value = await _loadPin();
     ever(pin, (p) {
       unawaited(_secure.write(key: _kPin, value: p));
     });
     return this;
+  }
+
+  /// Mémorise le producteur connecté (API ou vault local) pour le prochain boot.
+  Future<void> saveProducerUser(AuthUser user) async {
+    producerUser.value = user;
+    await _prefs.setString(_kProdId, user.id);
+    await _prefs.setString(_kProdName, user.name);
+    await _prefs.setString(_kProdEmail, user.email);
+    if (user.scoopName != null) {
+      await _prefs.setString(_kProdScoop, user.scoopName!);
+    } else {
+      await _prefs.remove(_kProdScoop);
+    }
+  }
+
+  Future<void> clearProducerUser() async {
+    producerUser.value = null;
+    await _prefs.remove(_kProdId);
+    await _prefs.remove(_kProdName);
+    await _prefs.remove(_kProdEmail);
+    await _prefs.remove(_kProdScoop);
   }
 
   /// Migre un ancien PIN SharedPreferences vers le trousseau, puis le supprime.
@@ -134,6 +173,7 @@ class SessionService extends GetxService {
   Future<void> clearAppRole() async {
     appRole.value = null;
     await _prefs.remove(_kAppRole);
+    await clearProducerUser();
   }
 
   /// Fin de l'activation (écran 04).
@@ -180,6 +220,7 @@ class SessionService extends GetxService {
     await _prefs.remove(_kActivated);
     await _prefs.remove(_kAppRole);
     appRole.value = null;
+    await clearProducerUser();
     await _prefs.remove(_kEmail);
     await _prefs.remove(_kName);
     await _prefs.remove(_kScoop);
@@ -309,6 +350,119 @@ class SessionService extends GetxService {
   /// Annuaire du cache local (instantané, fonctionne hors ligne).
   Future<void> restoreProducers() async {
     applyServerProducers(await Get.find<ProducerRepository>().cached());
+    await hydrateLocalProducers();
+  }
+
+  /// Réinjecte les fiches Drift (`LocalProducers`) absentes de la mémoire.
+  Future<void> hydrateLocalProducers() async {
+    if (!Get.isRegistered<AppDatabase>()) return;
+    try {
+      final rows = await Get.find<AppDatabase>().allProducers();
+      for (final row in rows) {
+        final idx = producers.indexWhere((p) =>
+            p.code == row.code ||
+            (row.remoteId != null &&
+                row.remoteId!.isNotEmpty &&
+                p.remoteId == row.remoteId));
+        if (idx >= 0) {
+          final cur = producers[idx];
+          if (row.remoteId != null &&
+              row.remoteId!.isNotEmpty &&
+              cur.remoteId != row.remoteId) {
+            _replace(cur, cur.copyWith(remoteId: row.remoteId, isNew: false));
+          }
+          continue;
+        }
+        final name = '${row.firstName} ${row.lastName}'.trim();
+        final initials = name.isEmpty
+            ? '?'
+            : (name.split(RegExp(r'\s+')).length >= 2
+                ? '${name[0]}${name.split(RegExp(r'\s+')).last[0]}'
+                : name[0]);
+        producers.insert(
+          0,
+          Producer(
+            initials: initials.toUpperCase(),
+            name: name.isEmpty ? row.code : name,
+            village: row.village,
+            age: row.age,
+            tint: MockData.tints[producers.length % MockData.tints.length],
+            code: row.code,
+            phone: row.phone.isEmpty ? '—' : row.phone,
+            sex: row.sex.isEmpty ? '—' : row.sex,
+            org: row.org.isEmpty ? '—' : row.org,
+            isNew: row.isNew,
+            remoteId: row.remoteId,
+            archived: row.archived,
+            createdAt: row.updatedAt,
+          ),
+        );
+      }
+      if (rows.isNotEmpty) {
+        recent.assignAll(producers.where((p) => !p.archived).take(3));
+        refreshTodoCount();
+      }
+    } catch (e) {
+      debugPrint('[ERROR][SessionService.hydrateLocalProducers] $e');
+    }
+  }
+
+  /// Persiste une fiche dans Drift pour survivre au cold start.
+  Future<void> persistLocalProducer(Producer p,
+      {required String first, required String last}) async {
+    if (!Get.isRegistered<AppDatabase>()) return;
+    try {
+      await Get.find<AppDatabase>().upsertProducer(LocalProducersCompanion(
+        clientId: drift.Value(p.code),
+        remoteId: drift.Value(p.remoteId),
+        code: drift.Value(p.code),
+        firstName: drift.Value(first),
+        lastName: drift.Value(last),
+        village: drift.Value(p.village),
+        phone: drift.Value(p.phone),
+        sex: drift.Value(p.sex),
+        org: drift.Value(p.org),
+        age: drift.Value(p.age),
+        isNew: drift.Value(p.isNew),
+        archived: drift.Value(p.archived),
+        updatedAt: drift.Value(DateTime.now()),
+      ));
+    } catch (e) {
+      debugPrint('[ERROR][SessionService.persistLocalProducer] $e');
+    }
+  }
+
+  /// Après flush outbox create : rattache `remoteId` / `code` serveur.
+  void reconcileProducerCreate({
+    required Map<String, dynamic> payload,
+    required String remoteId,
+    String? code,
+  }) {
+    final first = (payload['firstName'] ?? payload['first'] ?? '').toString();
+    final last = (payload['lastName'] ?? payload['last'] ?? '').toString();
+    final phone = (payload['phone'] ?? '').toString();
+    final name = '$first $last'.trim();
+    final match = producers.firstWhereOrNull((p) {
+      if (p.remoteId == remoteId) return true;
+      if (code != null && code.isNotEmpty && p.code == code) return true;
+      final sameName = name.isNotEmpty && p.name == name;
+      final samePhone = phone.isNotEmpty &&
+          p.phone.replaceAll(RegExp(r'\D'), '').endsWith(
+              phone.replaceAll(RegExp(r'\D'), ''));
+      return sameName && (phone.isEmpty || samePhone) && p.isNew;
+    });
+    if (match == null) return;
+    final sent = match.copyWith(
+      remoteId: remoteId,
+      code: (code != null && code.isNotEmpty) ? code : match.code,
+      isNew: false,
+    );
+    _replace(match, sent);
+    unawaited(persistLocalProducer(sent, first: first, last: last));
+    pending.removeWhere((x) =>
+        x.label.endsWith('· ${match.name}') &&
+        x.label.startsWith('Nouvelle fiche'));
+    refreshTodoCount();
   }
 
   /// Annuaire de l'API ; en cas d'échec (hors ligne…), on garde ce qui est déjà affiché.
@@ -404,6 +558,7 @@ class SessionService extends GetxService {
     producers.insert(0, p);
     visit(p);
     createdToday.value++;
+    unawaited(persistLocalProducer(p, first: first, last: last));
     // Déjà créée sur le serveur / outbox par l'écran : rien à renvoyer.
     if (!synced) {
       pending.add(PendingItem(
@@ -413,6 +568,7 @@ class SessionService extends GetxService {
     if (cniPhotos && !synced)
       pending.add(
           PendingItem(Symbols.badge_rounded, 'CNI recto + verso · ${p.name}'));
+    refreshTodoCount();
     return p;
   }
 
@@ -478,6 +634,7 @@ class SessionService extends GetxService {
           remoteId: data['id']?.toString(),
           isNew: false);
       _replace(p, sent);
+      await persistLocalProducer(sent, first: first, last: last);
       pending.removeWhere((x) =>
           x.label.endsWith('· ${p.name}') &&
           (x.label.startsWith('Nouvelle fiche')));
@@ -494,7 +651,10 @@ class SessionService extends GetxService {
           ? 'Création producteur pas encore disponible sur le serveur — fiche gardée en local.'
           : e.userMessage;
       if (Get.isRegistered<OutboxService>()) {
-        unawaited(Get.find<OutboxService>().enqueueProducerCreate(payload));
+        unawaited(Get.find<OutboxService>().enqueueProducerCreate({
+          ...payload,
+          'clientCode': p.code,
+        }));
       }
     }
   }

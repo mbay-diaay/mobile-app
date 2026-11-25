@@ -7,6 +7,7 @@ import '../../core/app_text.dart';
 import '../../core/app_theme.dart';
 import '../../routes/app_routes.dart';
 import '../../services/api_client.dart';
+import '../../services/auth_service.dart';
 import '../../services/session_service.dart';
 import '../../widgets/animations.dart';
 import '../../widgets/layout.dart';
@@ -21,12 +22,22 @@ class SplashController extends GetxController {
       final role = session.appRole.value;
       // Producteur d’abord : jamais le PIN technicien, même si activated est vrai.
       if (role == AppRole.producer) {
-        final hasSession = Get.isRegistered<ApiClient>() &&
-            Get.find<ApiClient>().accessToken != null;
-        Get.offAllNamed(hasSession
-            ? Routes.producerHome
-            : Routes.authIntent,
-            arguments: hasSession ? null : AppRole.producer);
+        final api = Get.isRegistered<ApiClient>() ? Get.find<ApiClient>() : null;
+        final persisted = session.producerUser.value;
+        final hasSession = (api?.accessToken != null) ||
+            (persisted != null && persisted.id.isNotEmpty);
+        Get.offAllNamed(
+          hasSession ? Routes.producerHome : Routes.authIntent,
+          arguments: hasSession
+              ? (persisted ??
+                  const AuthUser(
+                    id: 'local-producer',
+                    email: '',
+                    name: 'Producteur',
+                    role: 'producteur',
+                  ))
+              : AppRole.producer,
+        );
         return;
       }
       if (session.activated.value) {

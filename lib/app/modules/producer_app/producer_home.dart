@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -60,9 +62,14 @@ class ProducerHomeController extends GetxController {
   @override
   void onInit() {
     super.onInit();
+    final session = Get.find<SessionService>();
     user = (Get.arguments as AuthUser?) ??
+        session.producerUser.value ??
         const AuthUser(
             id: '', email: '', name: 'Producteur', role: 'producteur');
+    if (user.id.isNotEmpty && !isPreview) {
+      unawaited(session.saveProducerUser(user));
+    }
   }
 
   Future<void> logout() async {
@@ -71,7 +78,7 @@ class ProducerHomeController extends GetxController {
       return;
     }
     await Get.find<AuthService>().logout();
-    await Get.find<SessionService>().clearAppRole();
+    await Get.find<SessionService>().revoke();
     Get.offAllNamed(Routes.roleGate);
   }
 }

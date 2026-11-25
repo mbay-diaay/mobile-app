@@ -5,7 +5,7 @@ Document de reprise + **brief CTO** (copiable dans Notion).
 
 **Périmètre agent mobile** : `mbay-diaay-mobile` uniquement. Web Angular = Aldrich (ne pas toucher).
 
-**Session 25/11 (soir)** : écran **nouveau / déjà inscrit** (`auth_intent`) après choix de rôle ; PIN sans hint 1234 ; download = compteurs API réels ; build Android debug pour recette terrain. Front web : branche `fix/techniciens-sync-statut` (PR #14) — statut **Actif** après activation mobile via personnel SCOOP. Voir `docs/INTEGRATION_API.md`.
+**Session 25/11 (soir)** : écran **nouveau / déjà inscrit** (`auth_intent`) ; PIN sans hint 1234 ; download API réel ; APK debug `dist/mbay-diaay-tech-debug.apk`. Front : PR #14 `fix/techniciens-sync-statut`. **Goulots mobile traités** : auth producteur locale (fallback Keychain si `/auth/producer/*` absent), cold start producteur (`producerUser` persisté), `LocalProducers` Drift + réconciliation outbox, `connectivity_plus` (réseau réel + simulation Profil). Voir `docs/INTEGRATION_API.md`.
 
 ---
 
@@ -28,7 +28,7 @@ Le mobile est **aligné sur le contrat OpenAPI déployé** (auth tech, lecture a
 | API cible | `https://api.mbaydiaay.com/v1` | Aldrich owner back ; Mobile consomme le contrat OpenAPI **déployé** |
 | Front admin | Analog (`web-angular/`) = production ; React = archive | Ne plus développer dans `src/` React |
 | i18n FR / WO | GetX Translations ; WO = FR + brouillons (pas de pseudo `~~~`) | Relecture locuteur obligatoire avant « officiel » |
-| Offline démo | Simulation Profil › Réseau (coupe API + outbox) | Connectivité réelle = axe P2 |
+| Offline | `connectivity_plus` + bascule Profil (simulation) | Réseau réel + override manuel |
 
 ### Ce qui est solide aujourd’hui (démo OK)
 
@@ -46,9 +46,9 @@ Le mobile est **aligné sur le contrat OpenAPI déployé** (auth tech, lecture a
 ### Ce qui bloque encore (hors mobile / Aldrich)
 
 1. **`POST /producers` + write plots/crops** absents de OpenAPI prod → outbox locale seulement.
-2. **Auth producteur** — `/auth/producer/*` à livrer.
-3. **Comptes seed prod** — souvent `INVALID_CREDENTIALS` ; démo = seed local.
-4. **Réconciliation `remoteId`** après flush create (quand la route existera).
+2. **Auth producteur API** — `/auth/producer/*` à livrer ; **fallback local mobile OK** pour tests.
+3. **Comptes seed prod** — souvent `INVALID_CREDENTIALS` ; démo = seed local / vault local.
+4. ~~Réconciliation `remoteId` après flush~~ → **fait côté mobile** (attend la route create).
 
 ### Axes d’amélioration — arbitrage CTO
 
@@ -59,9 +59,9 @@ Le mobile est **aligné sur le contrat OpenAPI déployé** (auth tech, lecture a
 | **P0** | Déployer `POST /producers` + write plots/crops | **Aldrich** | Débloquer terrain write |
 | **P1** | ~~Aligner mobile sur contrat prod (lecture + PATCH + corrections)~~ | Mobile | **Fait** (25/11) |
 | **P1** | ~~`markSent` honnête~~ | Mobile | **Fait** (25/11) |
-| **P1** | Cold start producteur + switch rôle → logout | Mobile | Ouvert |
-| **P1** | Persist `LocalProducers` + réconciliation après create | Mobile | Dès route create |
-| **P2** | Connectivité réelle (`connectivity_plus`) | Mobile | Remplacer la seule simulation |
+| **P1** | ~~Cold start producteur + switch rôle → logout~~ | Mobile | **Fait** (25/11) |
+| **P1** | ~~Persist `LocalProducers` + réconciliation après create~~ | Mobile | **Fait** (25/11) |
+| **P2** | ~~Connectivité réelle (`connectivity_plus`)~~ | Mobile | **Fait** (25/11) |
 | **P2** | Chiffrement Drift (SQLCipher) | Mobile | Sécurité données terrain |
 | **P2** | Permissions UI depuis `GET /me` | Mobile | Aligner rôles serveur |
 | **P2** | ~~Commit WIP~~ | Mobile | **Fait** (23/11 soir) |
@@ -146,14 +146,14 @@ Comptes : `mbay-diaay-api/docs/COMPTES_RECETTE.md` (prod : souvent `INVALID_CRED
 
 ## 5. Pas fait / goulots
 
-1. Auth producteur API (Aldrich) — UI + messages prêts ; endpoints absents en prod  
-2. CRUD producers / plots / crops **sur prod** (Aldrich) — outbox locale en attendant  
+1. Auth producteur **API** (Aldrich) — fallback local mobile en attendant  
+2. CRUD producers / plots / crops **sur prod** (Aldrich) — outbox + Drift OK côté mobile  
 3. Seed comptes démo prod (Aldrich)  
-4. Sync : réconciliation id serveur après flush + `LocalProducers` au boot  
-5. Connectivité réelle (`connectivity_plus`)  
+4. ~~Sync réconciliation + LocalProducers~~ → **fait** (25/11)  
+5. ~~`connectivity_plus`~~ → **fait** (25/11)  
 6. Correction / commerce branchés API  
 7. Tests auto  
-8. ~~switch rôle sans logout~~ → **corrigé** (25/11 : `revoke`)  
+8. ~~switch rôle / cold start producteur / vault local~~ → **fait** (25/11)  
 9. ~~Dettes session dual-rôle / auth intent / download fictif / PIN hint~~ → **corrigées** (25/11)  
 10. ~~Push branche mobile~~ → **fait** (`chore/phase2-auth-cleanup`, PR #1)  
 
@@ -168,12 +168,12 @@ Voir aussi le **Brief CTO** en tête de document.
 | Priorité | Axe | Owner |
 |---|---|---|
 | P0 | ~~Session dual-rôle~~ | Mobile (**fait**) |
-| P0 | `/auth/producer/register` + `sign-in` | Aldrich |
+| P0 | `/auth/producer/register` + `sign-in` | Aldrich (fallback local mobile **fait**) |
 | P0 | Aligner prod API CRUD producers + plots/crops | Aldrich + Mobile |
-| P1 | Réconciliation outbox + markSent + LocalProducers | Mobile (**demain**) |
-| P1 | Cold start producteur + logout au switch rôle | Mobile (**demain**) |
+| P1 | ~~Réconciliation outbox + markSent + LocalProducers~~ | Mobile (**fait**) |
+| P1 | ~~Cold start producteur + logout au switch rôle~~ | Mobile (**fait**) |
 | P1 | Corrections producteur + fiche | Mobile + API |
-| P2 | `connectivity_plus` | Mobile |
+| P2 | ~~`connectivity_plus`~~ | Mobile (**fait**) |
 | P2 | SQLCipher Drift | Mobile |
 | P2 | Permissions depuis `/me` | Mobile |
 | P2 | ~~Commit WIP~~ | Mobile (**fait**) |

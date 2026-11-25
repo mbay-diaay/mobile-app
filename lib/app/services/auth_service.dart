@@ -4,6 +4,7 @@ import 'package:get/get.dart';
 
 import 'api_client.dart';
 import 'device_service.dart';
+import 'local_producer_auth.dart';
 import "package:flutter/foundation.dart";
 
 /// Étape OTP en attente, renvoyée par `POST /auth/sign-in`.
@@ -126,7 +127,7 @@ class AuthService extends GetxService {
     return _keepSession(data as Map<String, dynamic>);
   }
 
-  /// Inscription producteur (même app) — endpoints API encore à livrer.
+  /// Inscription producteur — API si dispo, sinon compte local (Keychain).
   Future<AuthUser> registerProducer({
     required String phone,
     required String password,
@@ -149,11 +150,22 @@ class AuthService extends GetxService {
       );
       return _keepSession(data as Map<String, dynamic>);
     } on ApiException catch (e) {
-      throw _producerAuthUnavailable(e);
+      if (!_isProducerApiMissing(e)) rethrow;
+      final local = Get.isRegistered<LocalProducerAuth>()
+          ? Get.find<LocalProducerAuth>()
+          : Get.put(LocalProducerAuth(), permanent: true);
+      final user = await local.register(
+        phone: phone,
+        password: password,
+        firstName: firstName,
+        lastName: lastName,
+      );
+      await _keepLocalProducerSession(user);
+      return user;
     }
   }
 
-  /// Connexion producteur : téléphone + mot de passe.
+  /// Connexion producteur : téléphone + mot de passe (API ou vault local).
   Future<AuthUser> signInProducer(
       {required String phone, required String password}) async {
     try {
@@ -161,25 +173,45 @@ class AuthService extends GetxService {
           auth: false, body: {'phone': phone.trim(), 'password': password});
       return _keepSession(data as Map<String, dynamic>);
     } on ApiException catch (e) {
-      throw _producerAuthUnavailable(e);
+      if (!_isProducerApiMissing(e) && e.code != 'INVALID_CREDENTIALS') {
+        rethrow;
+      }
+      final local = Get.isRegistered<LocalProducerAuth>()
+          ? Get.find<LocalProducerAuth>()
+          : Get.put(LocalProducerAuth(), permanent: true);
+      // Si l’API répond INVALID_CREDENTIALS, on ne tombe pas en local
+      // (compte serveur connu mais MDP faux).
+      if (e.code == 'INVALID_CREDENTIALS' && !_isProducerApiMissing(e)) {
+        rethrow;
+      }
+      final user = await local.signIn(phone: phone, password: password);
+      if (user == null) {
+        throw _isProducerApiMissing(e)
+            ? const ApiException(
+                'NOT_FOUND',
+                'Aucun compte local pour ce numéro. Créez un compte ou attendez l’ouverture serveur.',
+                status: 404,
+              )
+            : e;
+      }
+      await _keepLocalProducerSession(user);
+      return user;
     }
   }
 
-  /// 404 / route absente → message clair (API producteur pas encore déployée).
-  ApiException _producerAuthUnavailable(ApiException e) {
+  bool _isProducerApiMissing(ApiException e) {
     final raw = e.message.toLowerCase();
-    if (e.status == 404 ||
+    return e.status == 404 ||
         e.code == 'NOT_FOUND' ||
+        e.isNetwork ||
         raw.contains('cannot post') ||
         raw.contains('/auth/producer') ||
-        raw.contains('not found')) {
-      return ApiException(
-        'NOT_FOUND',
-        'Compte producteur pas encore disponible sur le serveur. Réessayez plus tard ou demandez un accès à votre SCOOP.',
-        status: e.status ?? 404,
-      );
-    }
-    return e;
+        raw.contains('not found');
+  }
+
+  Future<void> _keepLocalProducerSession(AuthUser user) async {
+    final token = '${ApiClient.localTokenPrefix}${user.id}';
+    await _client.setTokens(accessToken: token, refreshToken: token);
   }
 
   /// Conserve les jetons de la réponse et renvoie l'utilisateur.

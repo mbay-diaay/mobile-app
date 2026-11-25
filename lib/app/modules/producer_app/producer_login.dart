@@ -43,7 +43,9 @@ class ProducerLoginController extends GetxController {
     password.text = ProducerSeed.password;
     rev.value++;
     error.value = null;
-    await Get.find<SessionService>().setAppRole(AppRole.producer);
+    final session = Get.find<SessionService>();
+    await session.setAppRole(AppRole.producer);
+    await session.saveProducerUser(ProducerSeed.user);
     Get.offAllNamed(Routes.producerHome, arguments: ProducerSeed.user);
   }
 
@@ -66,18 +68,27 @@ class ProducerLoginController extends GetxController {
         return;
       }
       final auth = Get.find<AuthService>();
-      await auth.signInProducer(phone: phone.text, password: password.text);
-      final me = await auth.me();
-      if (me.role != AuthUser.producerRole) {
+      final user =
+          await auth.signInProducer(phone: phone.text, password: password.text);
+      AuthUser me = user;
+      final api = Get.find<ApiClient>();
+      if (!api.isLocalSession) {
+        try {
+          me = await auth.me();
+        } catch (_) {}
+      }
+      if (me.role.isNotEmpty && me.role != AuthUser.producerRole) {
         await auth.logout();
         error.value = 'Ce compte n’est pas un compte producteur.';
         shake.value++;
         return;
       }
-      await Get.find<SessionService>().setAppRole(AppRole.producer);
-      Get.offAllNamed(Routes.producerHome, arguments: me);
+      final session = Get.find<SessionService>();
+      await session.setAppRole(AppRole.producer);
+      await session.saveProducerUser(me.name.isEmpty ? user : me);
+      Get.offAllNamed(Routes.producerHome, arguments: me.name.isEmpty ? user : me);
     } on ApiException catch (e) {
-      error.value = _friendly(e);
+      error.value = e.userMessage;
       shake.value++;
     } catch (e) {
       error.value =
@@ -87,20 +98,6 @@ class ProducerLoginController extends GetxController {
     } finally {
       busy.value = false;
     }
-  }
-
-  String _friendly(ApiException e) {
-    final raw = '${e.message} ${e.userMessage}'.toLowerCase();
-    if (e.code == 'NOT_FOUND' ||
-        raw.contains('cannot post') ||
-        raw.contains('/auth/producer')) {
-      return 'Compte producteur pas encore disponible sur le serveur. Réessayez plus tard.';
-    }
-    final msg = e.userMessage;
-    if (msg.toLowerCase().contains('cannot ') || msg.contains('/v1/')) {
-      return 'Service indisponible pour le moment. Réessayez plus tard.';
-    }
-    return msg;
   }
 
   @override

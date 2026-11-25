@@ -80,10 +80,17 @@ class ApiClient extends GetxService {
   /// Appelé quand la session ne peut plus être renouvelée (jeton refusé).
   void Function()? onSessionExpired;
 
+  /// Préfixe des jetons de session producteur locale (sans API).
+  static const localTokenPrefix = 'local:';
+
   String get baseUrl => _baseUrl;
   String? get accessToken => _accessToken;
   String? get refreshToken => _refreshToken;
-  bool get hasSession => _refreshToken != null;
+  bool get hasSession => _accessToken != null || _refreshToken != null;
+
+  /// Session producteur hors API (`LocalProducerAuth`).
+  bool get isLocalSession =>
+      _accessToken != null && _accessToken!.startsWith(localTokenPrefix);
 
   /// Identifiant d'installation de cet appareil, envoyé dans l'en-tête `X-Device-Id`.
   String? get installationId => _installationId;
@@ -269,6 +276,7 @@ class ApiClient extends GetxService {
   /// seul un 401/403 (ou jeton invalide) déconnecte ; 429 / 5xx / réseau
   /// conservent les jetons (mode hors ligne / réessai).
   Future<bool> _doRefresh() async {
+    if (isLocalSession) return true;
     try {
       final res = await _send('POST', '/auth/refresh',
           body: {'refreshToken': _refreshToken});

@@ -22,8 +22,8 @@ Splash
 
 | Méthode | Route | Corps | Statut |
 |---|---|---|---|
-| POST | `/auth/producer/register` | `{phone, password, firstName, lastName, invitationCode?}` | **À créer** |
-| POST | `/auth/producer/sign-in` | `{phone, password}` | **À créer** |
+| POST | `/auth/producer/register` | `{phone, password, firstName, lastName, invitationCode?}` | **À créer** (fallback mobile `LocalProducerAuth`) |
+| POST | `/auth/producer/sign-in` | `{phone, password}` | **À créer** (même fallback local) |
 | POST | `/auth/refresh` | `{refreshToken}` | Existe |
 | GET | `/me` | — | Existe |
 | POST | `/auth/logout` | — | Existe |

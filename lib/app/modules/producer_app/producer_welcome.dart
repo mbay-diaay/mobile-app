@@ -19,7 +19,9 @@ class ProducerWelcomeView extends StatelessWidget {
 
   /// Compte mock Aïssa Diop — sans API, pour la démo.
   Future<void> _enterSeed() async {
-    await Get.find<SessionService>().setAppRole(AppRole.producer);
+    final session = Get.find<SessionService>();
+    await session.setAppRole(AppRole.producer);
+    await session.saveProducerUser(ProducerSeed.user);
     Get.offAllNamed(Routes.producerHome, arguments: ProducerSeed.user);
   }
 
@@ -40,7 +42,7 @@ class ProducerWelcomeView extends StatelessWidget {
                   FadeSlideIn(
                     child: TextButton.icon(
                       onPressed: () async {
-                        await Get.find<SessionService>().clearAppRole();
+                        await Get.find<SessionService>().revoke();
                         Get.offAllNamed(Routes.roleGate);
                       },
                       style: TextButton.styleFrom(

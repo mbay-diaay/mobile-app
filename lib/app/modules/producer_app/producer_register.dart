@@ -60,18 +60,23 @@ class ProducerRegisterController extends GetxController {
         invitationCode: invite.text,
       );
       AuthUser me = user;
-      try {
-        me = await auth.me();
-      } catch (_) {}
+      final api = Get.find<ApiClient>();
+      if (!api.isLocalSession) {
+        try {
+          me = await auth.me();
+        } catch (_) {}
+      }
       if (me.role.isNotEmpty && me.role != AuthUser.producerRole) {
         await auth.logout();
         error.value = 'Ce compte n’est pas un compte producteur.';
         shake.value++;
         return;
       }
-      await Get.find<SessionService>().setAppRole(AppRole.producer);
-      Get.offAllNamed(Routes.producerHome,
-          arguments: me.name.isEmpty ? user : me);
+      final session = Get.find<SessionService>();
+      await session.setAppRole(AppRole.producer);
+      final resolved = me.name.isEmpty ? user : me;
+      await session.saveProducerUser(resolved);
+      Get.offAllNamed(Routes.producerHome, arguments: resolved);
     } on ApiException catch (e) {
       error.value = e.userMessage;
       shake.value++;

@@ -8,6 +8,7 @@ import '../data/local/app_database.dart';
 import 'api_client.dart';
 import 'network_service.dart';
 import 'producers_service.dart';
+import 'session_service.dart';
 
 /// Synchro réelle : file Drift → endpoints API (producteurs d’abord).
 class OutboxService extends GetxService {
@@ -95,6 +96,14 @@ class OutboxService extends GetxService {
       // Sans id serveur, ne pas marquer « sent » (le flush a déjà commit).
       if (created == null || created['id'] == null) {
         throw StateError('Création producteur sans id serveur');
+      }
+      if (Get.isRegistered<SessionService>()) {
+        Get.find<SessionService>().reconcileProducerCreate(
+          payload: payload,
+          remoteId: created['id'].toString(),
+          code: created['code']?.toString() ??
+              payload['clientCode']?.toString(),
+        );
       }
       return;
     }
