@@ -22,6 +22,7 @@ class SyncController extends GetxController
   late final AnimationController send = AnimationController(
       vsync: this, duration: const Duration(milliseconds: 3600));
   final sent = false.obs;
+  var _lastFlushed = 0;
   late final Worker _w;
 
   @override
@@ -29,8 +30,9 @@ class SyncController extends GetxController
     super.onInit();
     send.addStatusListener((s) {
       if (s == AnimationStatus.completed) {
-        session.markSent();
-        sent.value = true;
+        // Ne vide la file UI que si le flush a vraiment envoyé quelque chose.
+        session.markSent(flushed: _lastFlushed);
+        sent.value = _lastFlushed > 0;
       }
     });
     _w = ever(net.online, (_) => _maybeSend());
@@ -44,12 +46,15 @@ class SyncController extends GetxController
 
   Future<void> _maybeSend() async {
     if (net.online.value && session.pending.isNotEmpty && !send.isAnimating) {
-      // Synchro réelle : flush Drift outbox vers l’API, puis animation UI.
+      _lastFlushed = 0;
       if (Get.isRegistered<OutboxService>()) {
-        await Get.find<OutboxService>().flush();
+        _lastFlushed = await Get.find<OutboxService>().flush();
       }
-      Future.delayed(
-          const Duration(milliseconds: 500), () => send.forward(from: 0));
+      // Animation « envoyé » seulement si au moins une mutation est partie.
+      if (_lastFlushed > 0) {
+        Future.delayed(
+            const Duration(milliseconds: 500), () => send.forward(from: 0));
+      }
     } else if (!net.online.value) {
       send.stop();
     }

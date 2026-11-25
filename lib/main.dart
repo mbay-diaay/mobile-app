@@ -42,10 +42,11 @@ Future<void> main() async {
     final r = Get.find<SessionService>().appRole.value;
     if (r == AppRole.producer) {
       if (Get.currentRoute == Routes.producerLogin ||
-          Get.currentRoute == Routes.producerWelcome) {
+          Get.currentRoute == Routes.producerWelcome ||
+          Get.currentRoute == Routes.authIntent) {
         return;
       }
-      Get.offAllNamed(Routes.producerWelcome);
+      Get.offAllNamed(Routes.authIntent, arguments: AppRole.producer);
       return;
     }
     if (Get.currentRoute == Routes.phone) return;

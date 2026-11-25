@@ -179,15 +179,27 @@ class ApiClient extends GetxService {
   Future<dynamic> patch(String path, {Object? body}) =>
       request('PATCH', path, body: body);
 
-  /// Envoi d'un fichier (multipart). Même renouvellement de session que [request].
+  Future<dynamic> put(String path, {Object? body}) =>
+      request('PUT', path, body: body);
+
+  /// Envoi d'un fichier (multipart POST). Même renouvellement de session que [request].
   Future<dynamic> postFile(String path, String filePath,
+          {String field = 'file'}) =>
+      _multipart('POST', path, filePath, field: field);
+
+  /// Envoi d'un fichier (multipart PUT) — ex. `PUT /producers/{id}/photo`.
+  Future<dynamic> putFile(String path, String filePath,
+          {String field = 'file'}) =>
+      _multipart('PUT', path, filePath, field: field);
+
+  Future<dynamic> _multipart(String method, String path, String filePath,
       {String field = 'file'}) async {
     if (Get.isRegistered<NetworkService>() &&
         !Get.find<NetworkService>().online.value) {
       throw const ApiException('NETWORK', 'Réseau indisponible');
     }
     Future<http.Response> once() async {
-      final req = http.MultipartRequest('POST', _uri(path))
+      final req = http.MultipartRequest(method, _uri(path))
         ..headers['Accept'] = 'application/json'
         ..files.add(await http.MultipartFile.fromPath(field, filePath));
       if (_accessToken != null) {
@@ -235,8 +247,12 @@ class ApiClient extends GetxService {
     } on http.ClientException catch (e) {
       final m = e.message;
       // macOS / certains clients : « Cannot POST /v1/… » quand la route n’existe pas.
-      if (m.toLowerCase().contains('cannot post') ||
-          m.toLowerCase().contains('cannot get') ||
+      final lower = m.toLowerCase();
+      if (lower.contains('cannot post') ||
+          lower.contains('cannot get') ||
+          lower.contains('cannot put') ||
+          lower.contains('cannot patch') ||
+          lower.contains('cannot delete') ||
           m.contains('/auth/producer')) {
         throw ApiException('NOT_FOUND', m, status: 404);
       }
@@ -249,30 +265,42 @@ class ApiClient extends GetxService {
         _refreshing = null;
       });
 
+  /// Renouvellement session — aligné doc authentification-mobile :
+  /// seul un 401/403 (ou jeton invalide) déconnecte ; 429 / 5xx / réseau
+  /// conservent les jetons (mode hors ligne / réessai).
   Future<bool> _doRefresh() async {
     try {
       final res = await _send('POST', '/auth/refresh',
           body: {'refreshToken': _refreshToken});
-      // Seul un refus explicite (401/403) perd la session : un 429 ou une panne serveur (5xx)
-      // garde les jetons, la requête échouera et pourra être rejouée plus tard.
       if (res.statusCode == 401 || res.statusCode == 403) {
         _deviceRefusal = _deviceRefusalIn(res);
         return false;
       }
+      // 429 / 5xx : garder la session (ne pas clearTokens).
       if (res.statusCode != 200 && res.statusCode != 201) return true;
       final data = jsonDecode(res.body);
+      if (data is! Map) return false;
       final access = data['accessToken'] as String?;
       if (access == null) return false;
       await setTokens(
           accessToken: access,
           refreshToken: data['refreshToken'] as String? ?? _refreshToken);
       return true;
-    } on ApiException {
-      // Réseau coupé : on garde la session, la requête échouera avec NETWORK.
+    } on ApiException catch (e) {
+      // Réseau coupé : on garde la session.
+      if (e.isNetwork) return true;
+      // Autre erreur métier inattendue sur refresh : ne pas jeter la session
+      // sauf codes d’auth explicites.
+      if (e.code == 'REFRESH_INVALID' ||
+          e.code == 'UNAUTHORIZED' ||
+          e.code == 'UNAUTHENTICATED') {
+        return false;
+      }
       return true;
     } catch (e) {
-      debugPrint("[ERROR][ApiClient._doRefresh] $e");
-      return false;
+      debugPrint('[ERROR][ApiClient._doRefresh] $e');
+      // Erreur inconnue : préférer garder la session (réessai possible).
+      return true;
     }
   }
 

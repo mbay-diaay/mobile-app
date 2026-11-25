@@ -1,23 +1,23 @@
-# État du projet — Mbay Diaay (23 nov. 2026 — soir)
+# État du projet — Mbay Diaay (25 nov. 2026)
 
 Document de reprise + **brief CTO** (copiable dans Notion).  
 À lire en premier avant de reprendre le code ou d’arbitrer une priorisation.
 
 **Périmètre agent mobile** : `mbay-diaay-mobile` uniquement. Web Angular = Aldrich (ne pas toucher).
 
-**Session du soir** : app macOS arrêtée · revue Bugbot · commit branche `chore/phase2-auth-cleanup` · reprise demain sur findings P1 (outbox / cold start producteur / switch rôle).
+**Session 25/11 (soir)** : écran **nouveau / déjà inscrit** (`auth_intent`) après choix de rôle ; PIN sans hint 1234 ; download = compteurs API réels ; build Android debug pour recette terrain. Front web : branche `fix/techniciens-sync-statut` (PR #14) — statut **Actif** après activation mobile via personnel SCOOP. Voir `docs/INTEGRATION_API.md`.
 
 ---
 
 ## Brief CTO — contexte à coller dans Notion
 
 > **Rôle** : CTO — arbitrage tech, priorités, découpage Mobile / API / Web.  
-> **Date** : 23 novembre 2026 (soir)  
+> **Date** : 25 novembre 2026  
 > **Périmètre** : Phase 2 terrain (app technicien + producteur) + Module 1 web SCOOP + API Nest.
 
 ### Situation en une phrase
 
-Le **design et les parcours UI** de l’app mobile sont prêts pour une démo terrain (seed local) ; le **vrai goulot reste l’alignement API prod** (auth producteur, CRUD) et la **synchro offline réelle** (réconciliation outbox).
+Le mobile est **aligné sur le contrat OpenAPI déployé** (auth tech, lecture annuaire/parcelles, PATCH/corrections) ; les écritures create plots/crops et l’auth producteur **manquent encore côté API prod**.
 
 ### Décisions tech déjà prises (ne pas rouvrir sans raison)
 
@@ -45,10 +45,10 @@ Le **design et les parcours UI** de l’app mobile sont prêts pour une démo te
 
 ### Ce qui bloque encore (hors mobile / Aldrich)
 
-1. **API prod ≠ code API local** — `POST` producteurs, plots, crops absents (ou non déployés) sur OpenAPI prod.
-2. **Auth producteur** — routes `/auth/producer/*` à livrer.
-3. **Comptes seed prod** — `INVALID_CREDENTIALS` ; démo = seed local.
-4. **Outbox / sync** — flush ≠ réconciliation id serveur (P1 ouvert, confirmé revue 23/11 soir).
+1. **`POST /producers` + write plots/crops** absents de OpenAPI prod → outbox locale seulement.
+2. **Auth producteur** — `/auth/producer/*` à livrer.
+3. **Comptes seed prod** — souvent `INVALID_CREDENTIALS` ; démo = seed local.
+4. **Réconciliation `remoteId`** après flush create (quand la route existera).
 
 ### Axes d’amélioration — arbitrage CTO
 
@@ -56,10 +56,11 @@ Le **design et les parcours UI** de l’app mobile sont prêts pour une démo te
 |---|---|---|---|
 | **P0** | ~~Session dual-rôle~~ | Mobile | **Fait** (23/11) |
 | **P0** | Livrer `/auth/producer/register` + `sign-in` | **Aldrich** | Bloquant parcours producteur |
-| **P0** | Aligner **prod** sur CRUD producteurs + plots/crops *ou* retirer les appels mobile | **Aldrich + CTO** | Choisir : déployer le contrat **ou** geler les features mobile |
-| **P1** | Réconciliation outbox + `markSent` honnête + persist `LocalProducers` | Mobile | **Demain** (revue Bugbot) |
-| **P1** | Cold start producteur : `GET /me` si jetons ; switch rôle → logout | Mobile | **Demain** |
-| **P1** | Brancher corrections (`POST …/corrections`) | Mobile + API | Valeur producteur |
+| **P0** | Déployer `POST /producers` + write plots/crops | **Aldrich** | Débloquer terrain write |
+| **P1** | ~~Aligner mobile sur contrat prod (lecture + PATCH + corrections)~~ | Mobile | **Fait** (25/11) |
+| **P1** | ~~`markSent` honnête~~ | Mobile | **Fait** (25/11) |
+| **P1** | Cold start producteur + switch rôle → logout | Mobile | Ouvert |
+| **P1** | Persist `LocalProducers` + réconciliation après create | Mobile | Dès route create |
 | **P2** | Connectivité réelle (`connectivity_plus`) | Mobile | Remplacer la seule simulation |
 | **P2** | Chiffrement Drift (SQLCipher) | Mobile | Sécurité données terrain |
 | **P2** | Permissions UI depuis `GET /me` | Mobile | Aligner rôles serveur |
@@ -69,14 +70,13 @@ Le **design et les parcours UI** de l’app mobile sont prêts pour une démo te
 
 ### Questions ouvertes (CTO)
 
-1. **Priorité sprint** : débloquer producteur API **ou** durcir sync technicien offline d’abord ?
-2. **Contrat API** : on force le déploiement du CRUD local vers prod, ou on downgrade le mobile en « lecture + outbox locale » jusqu’à alignement ?
-3. **Stores** : une app dual-rôle suffit-elle pour Review, ou faudra-t-il 2 binaires (proto archive déjà prêt) ?
-4. **Web** : Aldrich continue seul sur `main` Angular ; interventions Mobile/Front seulement sur accord explicite.
+1. **Aldrich** : date de livraison `POST /producers` + plots/crops write ?
+2. **Stores** : une app dual-rôle suffit-elle pour Review ?
+3. **Web** : Aldrich seul sur `main` Angular.
 
 ### Message type à Aldrich (si ping)
 
-> Priorités API bloquantes mobile : (1) reseeder comptes démo prod, (2) déployer auth producteur, (3) aligner OpenAPI prod sur POST/PATCH producers + plots + crops. Sans ça, la démo reste en seed local / offline simulé.
+> Priorités API bloquantes mobile : (1) `POST /producers` + write plots/crops, (2) `/auth/producer/*`, (3) reseeder comptes démo. Mobile déjà aligné lecture + PATCH + corrections sur OpenAPI prod.
 
 ---
 
@@ -96,8 +96,8 @@ Le **design et les parcours UI** de l’app mobile sont prêts pour une démo te
 
 | Dépôt | Chemin | Branche | Notes |
 |---|---|---|---|
-| Mobile | `/Users/moha/Dev/mbay-diaay-mobile` | `chore/phase2-auth-cleanup` | Commit soir 23/11 (Phase 2 UI + dual-rôle + seed + Drift). **Pas encore push** vers `origin`. |
-| Web | `/Users/moha/Dev/mbay-diaay` | `main` (= `origin/main`) | Aldrich. Ne pas toucher. |
+| Mobile | `/Users/moha/Dev/mbay-diaay-mobile` | `chore/phase2-auth-cleanup` | Auth intent + alignement OpenAPI + outbox ; build APK debug 25/11. |
+| Web | `/Users/moha/Dev/mbay-diaay` | `fix/techniciens-sync-statut` | PR [#14](https://github.com/mbay-diaay/mbay-diaay-front/pull/14) — sync statut techniciens. |
 | API | `/Users/moha/Dev/mbay-diaay-api` | `chore/t1-livrables-architecture` | CRUD local ; **prod OpenAPI ≠ tout ce code**. |
 | Producer (proto) | `/Users/moha/Dev/mbay-diaay-producer` | `main` (pas de remote) | Archive. |
 
@@ -128,18 +128,12 @@ Comptes : `mbay-diaay-api/docs/COMPTES_RECETTE.md` (prod : souvent `INVALID_CRED
 
 ---
 
-## 4. Fait récemment (session 22–23/11)
+## 4. Fait récemment (sessions 22–25/11)
 
 - Une app dual-rôle + charte producteur alignée technicien  
-- i18n FR/WO sans pseudo tirets ; Accueil / Producteurs / Profil branchés  
-- Changer PIN → vérif PIN actuel  
-- Recherche producteurs + clear champ  
-- Offline simulé : coupe `ApiClient` + outbox ; toast ; Accueil A/B  
-- Seed local pour démo sans dépendre de prod  
-- **Finalisation mobile** : splash / jetons / expiration par rôle ; OTP refuse producteur ; annuaire vide hors seed ; `queueRemote: false` après API/outbox ; auth producteur 404 → message clair  
-- **Espace producteur (23)** densifié : DarkHeader, KPIs, 3 parcelles, alertes, calendrier oignon, prochaines actions, SwipeCta  
-- Cible **macOS** debug pour revue design  
-- **Commit** WIP sur `chore/phase2-auth-cleanup` (soir 23/11)
+- i18n FR/WO ; seed local ; offline simulé ; Espace producteur densifié  
+- **25/11 — alignement OpenAPI prod** : mapping `ProducerDto`, `GET /plots`, PATCH + corrections + photo, create/plots/crops → outbox sans faux succès, sync `markSent` honnête, docs `INTEGRATION_API` / `ETAT_PROJET`
+- **25/11 soir** : `Routes.authIntent` (nouveau / déjà inscrit) ; web PR #14 statut technicien Actif ; APK Android debug pour tests
 
 ### Déjà en place (socle)
 

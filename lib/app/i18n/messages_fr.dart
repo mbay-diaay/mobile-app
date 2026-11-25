@@ -30,6 +30,22 @@ const Map<String, String> messagesFr = {
       'Vos parcelles, calendrier cultural, demande de correction.',
   'role.footer': 'Vous pourrez changer de rôle après déconnexion.',
 
+  // Nouveau / déjà inscrit
+  'intent.title': 'Bienvenue',
+  'intent.leadTech':
+      'Activez votre compte avec le code du gestionnaire, ou reconnectez-vous.',
+  'intent.leadProd':
+      'Créez votre espace producteur, ou reconnectez-vous avec votre téléphone.',
+  'intent.first': 'Je suis nouveau',
+  'intent.returning': 'J’ai déjà un compte',
+  'intent.firstTechSub':
+      'Code à 5 chiffres remis par le gestionnaire, puis votre mot de passe.',
+  'intent.returningTechSub':
+      'Téléphone et mot de passe choisis à la première connexion.',
+  'intent.firstProdSub': 'Inscription avec votre numéro de téléphone.',
+  'intent.returningProdSub': 'Connexion avec téléphone et mot de passe.',
+  'intent.footer': 'Vous pourrez revenir en arrière pour changer de rôle.',
+
   // Auth technicien
   'auth.tech.first': 'Première connexion',
   'auth.tech.password': 'Connexion à votre compte',
@@ -49,13 +65,13 @@ const Map<String, String> messagesFr = {
   'auth.prod.preview': 'Aperçu design (sans compte)',
   'auth.prod.seed': 'Accès seed local · Aïssa Diop (77 000 00 00)',
   'auth.prod.phoneOnly':
-      'Connexion par numéro de téléphone — pas d’e-mail.\nLes routes API producteur sont encore à livrer.',
+      'Connexion par numéro de téléphone — pas d’e-mail.',
   'auth.prod.login': 'Connexion',
   'auth.prod.register': 'Créer mon compte',
   'auth.prod.phone': 'Téléphone',
   'auth.prod.password': 'Mot de passe',
   'auth.prod.hintLogin':
-      'Seed : 77 000 00 00 / Demonstration2026 — ou votre compte API.',
+      'Téléphone et mot de passe choisis à l’inscription.',
 
   // Shell technicien
   'shell.home': 'Accueil',

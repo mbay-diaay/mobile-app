@@ -22,9 +22,8 @@ class ProducersController extends GetxController {
   /// Vue des fiches archivées (restaurables) au lieu des fiches actives.
   final showArchived = false.obs;
 
-  /// Total de la SCOOP : 212 fiches téléchargées + celles créées ici, hors archivées.
-  int get total =>
-      212 + session.activeProducers.length - MockData.producers.length;
+  /// Total affiché = annuaire réel (API / seed), hors archivées.
+  int get total => session.activeProducers.length;
 
   @override
   void onClose() {

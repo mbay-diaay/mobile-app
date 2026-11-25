@@ -16,13 +16,12 @@ class RoleGateController extends GetxController {
   Future<void> choose(AppRole role) async {
     final session = Get.find<SessionService>();
     await session.setAppRole(role);
-    if (role == AppRole.technician) {
+    if (role == AppRole.technician && session.activated.value) {
       // Déjà activé (ex. après « Changer de rôle ») → PIN, pas l’écran téléphone.
-      Get.offAllNamed(
-          session.activated.value ? Routes.unlock : Routes.phone);
-    } else {
-      Get.offAllNamed(Routes.producerWelcome);
+      Get.offAllNamed(Routes.unlock);
+      return;
     }
+    Get.offAllNamed(Routes.authIntent, arguments: role);
   }
 }
 

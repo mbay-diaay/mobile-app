@@ -5,7 +5,6 @@ import 'package:material_symbols_icons/symbols.dart';
 import '../../core/app_colors.dart';
 import '../../core/app_text.dart';
 import '../../core/app_theme.dart';
-import '../../data/mock_data.dart' show MockData;
 import '../../data/producer_seed.dart';
 import '../../routes/app_routes.dart';
 import '../../services/api_client.dart';
@@ -135,42 +134,48 @@ class ProfileTab extends StatelessWidget {
               row(_Setting(
                 icon: Symbols.smartphone_rounded,
                 title: 'État du téléphone',
-                sub:
-                    '${212 + s.activeProducers.length - MockData.producers.length} fiches · 248 parcelles · carte 38 Mo',
+                sub: () {
+                  final n = s.activeProducers.length;
+                  final plots = s.plots.values.fold<int>(0, (a, l) => a + l.length);
+                  return '$n fiche${n > 1 ? 's' : ''} · $plots parcelle${plots > 1 ? 's' : ''}';
+                }(),
                 last: true,
               )),
             ]),
             const SizedBox(height: 8),
             _Group(children: [
-              row(_Setting(
-                icon: Symbols.visibility_rounded,
-                title: 'Aperçu espace producteur',
-                sub: 'Maquette 23 · parcelles, calendrier, alertes',
-                bg: AppColors.blueSoft,
-                ink: AppColors.blueInk,
-                onTap: () => Get.toNamed(Routes.producerSpace),
-              )),
-              row(_Setting(
-                icon: Symbols.agriculture_rounded,
-                title: 'profile.producerPreview'.tr,
-                sub: 'profile.producerPreviewSub'.tr,
-                onTap: () => Get.toNamed(
-                  Routes.producerHome,
-                  arguments: AuthUser(
-                    id: 'seed-producer-push',
-                    email: ProducerSeed.user.email,
-                    name: ProducerSeed.user.name,
-                    role: AuthUser.producerRole,
-                    scoopName: ProducerSeed.user.scoopName,
+              if (!kReleaseMode) ...[
+                row(_Setting(
+                  icon: Symbols.visibility_rounded,
+                  title: 'Aperçu espace producteur',
+                  sub: 'Maquette 23 · parcelles, calendrier, alertes',
+                  bg: AppColors.blueSoft,
+                  ink: AppColors.blueInk,
+                  onTap: () => Get.toNamed(Routes.producerSpace),
+                )),
+                row(_Setting(
+                  icon: Symbols.agriculture_rounded,
+                  title: 'profile.producerPreview'.tr,
+                  sub: 'profile.producerPreviewSub'.tr,
+                  onTap: () => Get.toNamed(
+                    Routes.producerHome,
+                    arguments: AuthUser(
+                      id: 'seed-producer-push',
+                      email: ProducerSeed.user.email,
+                      name: ProducerSeed.user.name,
+                      role: AuthUser.producerRole,
+                      scoopName: ProducerSeed.user.scoopName,
+                    ),
                   ),
-                ),
-              )),
+                )),
+              ],
               row(_Setting(
                 icon: Symbols.swap_horiz_rounded,
                 title: 'profile.changeRole'.tr,
                 sub: 'profile.changeRoleSub'.tr,
                 onTap: () async {
-                  await Get.find<SessionService>().clearAppRole();
+                  // Changer de rôle = fin de session : sinon jetons tech/producteur se mélangent.
+                  await Get.find<SessionService>().revoke();
                   Get.offAllNamed(Routes.roleGate);
                 },
               )),

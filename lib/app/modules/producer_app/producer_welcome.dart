@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -100,16 +101,18 @@ class ProducerWelcomeView extends StatelessWidget {
                       ),
                     ),
                     const Spacer(),
-                    Center(
-                      child: TextButton(
-                        onPressed: _enterSeed,
-                        child: Text('auth.prod.seed'.tr,
-                            style: jakarta(12,
-                                weight: FontWeight.w700,
-                                color: AppColors.forest)),
+                    if (!kReleaseMode) ...[
+                      Center(
+                        child: TextButton(
+                          onPressed: _enterSeed,
+                          child: Text('auth.prod.seed'.tr,
+                              style: jakarta(12,
+                                  weight: FontWeight.w700,
+                                  color: AppColors.forest)),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 4),
+                      const SizedBox(height: 4),
+                    ],
                     Text(
                       'auth.prod.phoneOnly'.tr,
                       textAlign: TextAlign.center,

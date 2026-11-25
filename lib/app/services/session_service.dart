@@ -13,6 +13,7 @@ import '../data/mock_data.dart';
 import '../data/local/app_database.dart';
 import 'api_client.dart';
 import 'auth_service.dart';
+import 'outbox_service.dart';
 import 'producer_repository.dart';
 import 'secure_storage.dart';
 
@@ -169,11 +170,13 @@ class SessionService extends GetxService {
     failedAttempts.value = 0;
     pin.value = defaultPin;
     permissions.clear();
+    usingDemoCatalog.value = false;
     // Rien de l'utilisateur précédent ne doit rester affiché.
     producers.clear();
     recent.clear();
     plots.clear();
     cropPlans.clear();
+    todoCount.value = 0;
     await _prefs.remove(_kActivated);
     await _prefs.remove(_kAppRole);
     appRole.value = null;
@@ -204,8 +207,12 @@ class SessionService extends GetxService {
   final surveyedToday = 0.obs;
   final cropsToday = 0.obs;
 
+  /// True seulement après [loadDemoCatalog] (seed local) — faux pour un boot API.
+  final usingDemoCatalog = false.obs;
+
   /// Catalogue de démonstration (seed local Fatou Sarr) — pas au cold start API.
   void loadDemoCatalog() {
+    usingDemoCatalog.value = true;
     producers.assignAll(MockData.producers);
     recent.assignAll(MockData.recent);
     toFix.assignAll(MockData.syncIssues);
@@ -214,6 +221,67 @@ class SessionService extends GetxService {
     createdToday.value = 4;
     surveyedToday.value = 1;
     cropsToday.value = 0;
+  }
+
+  /// Recalcule « À compléter » hors seed : fiches nouvelles + parcelles sans cultures.
+  void refreshTodoCount() {
+    if (usingDemoCatalog.value) return;
+    var n = 0;
+    for (final p in activeProducers) {
+      if (p.isNew) n++;
+      final pls = plotsOf(p);
+      if (pls.isEmpty) {
+        n++;
+      } else {
+        for (final pl in pls) {
+          final plan = cropPlans[pl.code];
+          if (plan == null || plan.values.every((l) => l.isEmpty)) n++;
+        }
+      }
+    }
+    todoCount.value = n;
+  }
+
+  /// Todos dérivés de la session (hors seed MockData).
+  List<TodoItem> buildTodos() {
+    if (usingDemoCatalog.value) return MockData.todos;
+    final out = <TodoItem>[];
+    for (final p in activeProducers) {
+      if (p.isNew) {
+        out.add(TodoItem(
+          Symbols.person_rounded,
+          AppColors.amberSoft,
+          AppColors.amberInk,
+          'Compléter la fiche',
+          p.name,
+        ));
+      }
+      final pls = plotsOf(p);
+      if (pls.isEmpty) {
+        out.add(TodoItem(
+          Symbols.pentagon_rounded,
+          AppColors.blueSoft,
+          AppColors.blueInk,
+          'Relever une parcelle',
+          p.name,
+          isPlot: true,
+        ));
+      }
+      for (final pl in pls) {
+        final plan = cropPlans[pl.code];
+        if (plan == null || plan.values.every((l) => l.isEmpty)) {
+          out.add(TodoItem(
+            Symbols.eco_rounded,
+            AppColors.sage,
+            AppColors.forest,
+            'Déclarer les cultures · ${pl.code}',
+            '${pl.code} · ${p.name}',
+            isPlot: true,
+          ));
+        }
+      }
+    }
+    return out;
   }
 
   int _nextProducer = 20;
@@ -258,11 +326,18 @@ class SessionService extends GetxService {
   /// Remplace l'annuaire par celui de l'API / cache ; les fiches locales non sync
   /// restent en tête. Liste serveur vide → on ne réinjecte pas MockData.
   void applyServerProducers(List<Producer> server) {
+    usingDemoCatalog.value = false;
     final local = producers.where((p) => p.isNew).toList();
     if (server.isEmpty) {
-      if (local.isEmpty) return;
+      if (local.isEmpty) {
+        producers.clear();
+        recent.clear();
+        refreshTodoCount();
+        return;
+      }
       producers.assignAll(local);
       recent.assignAll(local.take(3));
+      refreshTodoCount();
       return;
     }
     final archived = {
@@ -274,6 +349,7 @@ class SessionService extends GetxService {
         archived.contains(p.code) ? p.copyWith(archived: true) : p,
     ]);
     recent.assignAll(producers.where((p) => !p.archived).take(3));
+    refreshTodoCount();
   }
 
   bool checkPin(String value) {
@@ -384,17 +460,19 @@ class SessionService extends GetxService {
     return updated;
   }
 
-  /// Envoie la nouvelle fiche à l'API. Hors ligne ou refusée : elle reste « en attente d'envoi ».
+  /// Tente `POST /producers` (absent sur OpenAPI prod) ; sinon file outbox locale.
   Future<void> _pushCreate(Producer p, String first, String last) async {
+    final payload = <String, dynamic>{
+      'firstName': first,
+      'lastName': last.isEmpty ? first : last,
+      if (ProducerRepository.apiPhone(p.phone == '—' ? null : p.phone) != null)
+        'phone': ProducerRepository.apiPhone(p.phone),
+      if (p.village.isNotEmpty) 'village': p.village,
+      'status': 'recensé',
+    };
     try {
-      final data = await Get.find<ApiClient>().post('/producers', body: {
-        'firstName': first,
-        'lastName': last.isEmpty ? first : last,
-        if (ProducerRepository.apiPhone(p.phone == '—' ? null : p.phone) !=
-            null)
-          'phone': ProducerRepository.apiPhone(p.phone),
-        if (p.village.isNotEmpty) 'village': p.village,
-      }) as Map<String, dynamic>;
+      final data = await Get.find<ApiClient>().post('/producers', body: payload)
+          as Map<String, dynamic>;
       final sent = p.copyWith(
           code: (data['code'] ?? p.code).toString(),
           remoteId: data['id']?.toString(),
@@ -403,7 +481,6 @@ class SessionService extends GetxService {
       pending.removeWhere((x) =>
           x.label.endsWith('· ${p.name}') &&
           (x.label.startsWith('Nouvelle fiche')));
-      // Le code vient de l'API : les parcelles suivent la fiche, puis partent à leur tour.
       if (sent.code != p.code && plots.containsKey(p.code)) {
         plots[sent.code] = plots.remove(p.code)!;
       }
@@ -411,28 +488,40 @@ class SessionService extends GetxService {
         await _pushPlot(sent, pl);
       }
     } on ApiException catch (e) {
-      debugPrint("[ERROR][SessionService._pushPlot] ${e}");
-      lastSyncError.value = e.userMessage;
+      debugPrint('[ERROR][SessionService._pushCreate] $e');
+      // Route absente (prod) ou réseau : garder en attente + outbox.
+      lastSyncError.value = e.code == 'NOT_FOUND'
+          ? 'Création producteur pas encore disponible sur le serveur — fiche gardée en local.'
+          : e.userMessage;
+      if (Get.isRegistered<OutboxService>()) {
+        unawaited(Get.find<OutboxService>().enqueueProducerCreate(payload));
+      }
     }
   }
 
-  /// Envoie la modification (fiche déjà connue de l'API).
+  /// Envoie la modification (fiche déjà connue de l'API) via `PATCH /producers/{id}`.
   Future<void> _pushUpdate(
       Producer p, String first, String last, String? phone) async {
     final id = p.remoteId;
-    if (id == null)
-      return; // pas encore envoyée : l'envoi initial portera les valeurs à jour
+    if (id == null) return;
     try {
+      final sexApi = switch (p.sex) {
+        'Femme' => 'F',
+        'Homme' => 'H',
+        _ => null,
+      };
       await Get.find<ApiClient>().patch('/producers/$id', body: {
         'firstName': first,
         if (last.isNotEmpty) 'lastName': last,
         'village': p.village,
         if (ProducerRepository.apiPhone(phone) != null)
           'phone': ProducerRepository.apiPhone(phone),
+        if (p.age > 0) 'age': p.age,
+        if (sexApi != null) 'sex': sexApi,
       });
       pending.removeWhere((x) => x.label == 'Modification · ${p.name}');
     } on ApiException catch (e) {
-      debugPrint("[ERROR][SessionService._pushUpdate] ${e}");
+      debugPrint('[ERROR][SessionService._pushUpdate] $e');
       lastSyncError.value = e.userMessage;
     }
   }
@@ -487,83 +576,146 @@ class SessionService extends GetxService {
 
   String nextPlotCode() => 'PA-${(_nextPlot++).toString().padLeft(4, '0')}';
 
-  /// Lit les parcelles et cultures de la fiche sur le serveur (`GET /producers/:id`) et
-  /// remplace ce qui est affiché. Lève une [ApiException] en cas d'échec.
+  /// Lit les parcelles via `GET /plots?producerId=` (OpenAPI prod) et hydrate
+  /// les cultures depuis `PlotDto.crops`. Lève une [ApiException] en cas d'échec.
   Future<void> loadPlots(Producer p) async {
     final id = p.remoteId;
     if (id == null) return; // fiche pas encore créée sur le serveur
-    final data = await Get.find<ApiClient>().get('/producers/$id')
-        as Map<String, dynamic>;
-    final apiCrops = [
-      for (final c in (data['crops'] as List? ?? const []))
-        c as Map<String, dynamic>
-    ];
+    final api = Get.find<ApiClient>();
+    final data = await api.get('/plots', query: {
+      'producerId': id,
+      'limit': 500,
+      'page': 1,
+    }) as Map<String, dynamic>;
+    final items = data['items'] as List? ?? const [];
     final list = <Plot>[];
-    for (final j in (data['plots'] as List? ?? const [])) {
+    for (final j in items) {
       final m = j as Map<String, dynamic>;
-      final plotId = m['id'].toString();
-      final ha = (m['areaHa'] as num?)?.toDouble() ?? 0;
-      // Cultures de la parcelle, par saison (parts égales : le serveur n'a pas de %).
-      final bySeason = <int, List<Map<String, dynamic>>>{};
-      for (final c
-          in apiCrops.where((c) => c['plotId']?.toString() == plotId)) {
-        final season =
-            (c['season'] ?? '').toString().startsWith('Contre') ? 1 : 0;
-        (bySeason[season] ??= []).add(c);
-      }
-      final plan = <int, List<Crop>>{};
-      bySeason.forEach((season, items) {
-        final each = (100 / items.length).floor();
-        plan[season] = [
-          for (var i = 0; i < items.length; i++)
-            _cropFromApi(
-                items[i], i == 0 ? 100 - each * (items.length - 1) : each, i)
-        ];
-      });
-      if (plan.isEmpty) {
-        cropPlans.remove(plotId);
-      } else {
-        cropPlans[plotId] = plan;
-      }
-      final raw = (m['name'] ?? '').toString();
-      list.add(_withCrops(Plot(
-          plotId,
-          '${ha.toStringAsFixed(2).replaceAll('.', ',')} ha',
-          'Cultures à déclarer',
-          'Enregistrée',
-          AppColors.lime,
-          AppColors.forest,
-          remoteId: plotId,
-          areaHa: ha,
-          lat: (m['lat'] as num?)?.toDouble(),
-          lng: (m['lng'] as num?)?.toDouble(),
-          label: raw.isEmpty ? plotId : raw)));
+      final plot = _plotFromApi(m);
+      _hydrateCropsFromPlot(m, plot.code);
+      list.add(_withCrops(plot));
     }
     plots[p.code] = list;
+    refreshTodoCount();
+  }
+
+  Plot _plotFromApi(Map<String, dynamic> m) {
+    final plotId = (m['id'] ?? m['code'] ?? '').toString();
+    final code = (m['code'] ?? plotId).toString();
+    final ha = (m['areaHa'] as num?)?.toDouble() ??
+        (m['declaredAreaHa'] as num?)?.toDouble() ??
+        0;
+    final centroid = m['centroid'];
+    double? lat;
+    double? lng;
+    if (centroid is Map) {
+      lat = (centroid['lat'] as num?)?.toDouble();
+      lng = (centroid['lng'] as num?)?.toDouble();
+    }
+    lat ??= (m['lat'] as num?)?.toDouble();
+    lng ??= (m['lng'] as num?)?.toDouble();
+    final statusRaw = (m['status'] ?? '').toString();
+    final validated = statusRaw == 'validée' || statusRaw.isEmpty;
+    final landmark = (m['landmark'] ?? m['village'] ?? '').toString();
+    return Plot(
+      code,
+      '${ha.toStringAsFixed(2).replaceAll('.', ',')} ha',
+      'Cultures à déclarer',
+      validated ? 'Enregistrée' : 'À reprendre',
+      validated ? AppColors.lime : AppColors.amberSoft,
+      validated ? AppColors.forest : AppColors.amberInk,
+      remoteId: plotId,
+      areaHa: ha,
+      lat: lat,
+      lng: lng,
+      label: landmark.isEmpty ? code : landmark,
+    );
+  }
+
+  /// Cultures `PlotCropDto` → plans locaux (saison 0 = chn, 1 = cs).
+  void _hydrateCropsFromPlot(Map<String, dynamic> m, String plotCode) {
+    final apiCrops = m['crops'] as List? ?? const [];
+    if (apiCrops.isEmpty) {
+      cropPlans.remove(plotCode);
+      return;
+    }
+    final plan = <int, List<Crop>>{};
+    var i = 0;
+    for (final raw in apiCrops) {
+      final c = raw as Map<String, dynamic>;
+      final name =
+          (c['crop'] ?? c['cropRaw'] ?? c['name'] ?? '').toString();
+      if (name.isEmpty) continue;
+      final share = (c['sharePct'] as num?)?.round() ?? 0;
+      final seasons = c['seasons'];
+      final seasonIndexes = <int>[];
+      if (seasons is Map) {
+        if (seasons['chn'] != null) seasonIndexes.add(0);
+        if (seasons['cs'] != null) seasonIndexes.add(1);
+      }
+      if (seasonIndexes.isEmpty) seasonIndexes.add(0);
+      final crop = _cropFromApi(c, share > 0 ? share : 0, i++);
+      for (final s in seasonIndexes) {
+        (plan[s] ??= []).add(crop.copy()..remoteId = crop.remoteId);
+      }
+    }
+    // Parts manquantes : répartir également dans chaque saison non vide.
+    for (final e in plan.entries) {
+      final sum = e.value.fold<int>(0, (a, c) => a + c.share);
+      if (sum == 0 && e.value.isNotEmpty) {
+        final each = (100 / e.value.length).floor();
+        for (var k = 0; k < e.value.length; k++) {
+          e.value[k].share =
+              k == 0 ? 100 - each * (e.value.length - 1) : each;
+        }
+      }
+    }
+    if (plan.isEmpty) {
+      cropPlans.remove(plotCode);
+    } else {
+      cropPlans[plotCode] = plan;
+    }
   }
 
   Crop _cropFromApi(Map<String, dynamic> c, int share, int index) {
-    final name = (c['name'] ?? '').toString();
+    final name =
+        (c['crop'] ?? c['cropRaw'] ?? c['name'] ?? '').toString();
     final spec = CropCatalog.byName(name) ?? CropCatalog.custom(name, index);
     return spec.toCrop(share, (c['variety'] ?? '').toString())
       ..remoteId = c['id']?.toString();
   }
 
-  /// Envoie la parcelle au serveur (nom, surface en hectares, point central) et renvoie son
-  /// identifiant. Lève une [ApiException] si le serveur refuse : l'écran l'affiche et
-  /// propose de réessayer. Le contour complet reste sur le téléphone.
+  /// Tente l’envoi parcelle (route write absente en prod). Renvoie l’id serveur ou null.
+  /// Sur `NOT_FOUND`, enqueue outbox et ne lève pas — la parcelle reste locale.
   Future<String?> sendPlot(Producer owner, Plot plot) async {
     final pid = owner.remoteId;
-    if (pid == null) return null; // fiche de démonstration : rien à envoyer
-    final data =
-        await Get.find<ApiClient>().post('/producers/$pid/plots', body: {
+    if (pid == null) return null;
+    final body = {
       'name': 'Parcelle ${plot.code}',
       'areaHa': double.parse(plot.areaHa.toStringAsFixed(4)),
       if (owner.village.isNotEmpty) 'village': owner.village,
       if (plot.lat != null) 'lat': plot.lat,
       if (plot.lng != null) 'lng': plot.lng,
-    }) as Map<String, dynamic>;
-    return data['id']?.toString();
+    };
+    try {
+      final data = await Get.find<ApiClient>()
+          .post('/producers/$pid/plots', body: body) as Map<String, dynamic>;
+      return data['id']?.toString();
+    } on ApiException catch (e) {
+      debugPrint('[ERROR][SessionService.sendPlot] $e');
+      lastSyncError.value = e.code == 'NOT_FOUND'
+          ? 'Envoi parcelle pas encore disponible sur le serveur — gardée en local.'
+          : e.userMessage;
+      if (Get.isRegistered<OutboxService>()) {
+        await Get.find<OutboxService>().enqueueGeneric(
+          entity: 'plot',
+          operation: 'create',
+          payload: {'path': '/producers/$pid/plots', 'body': body},
+        );
+      }
+      if (e.code != 'NOT_FOUND' && e.code != 'NETWORK') rethrow;
+      return null;
+    }
   }
 
   /// Ajoute la parcelle à la fiche, une fois enregistrée (ou sans envoi pour une fiche de démonstration).
@@ -602,32 +754,21 @@ class SessionService extends GetxService {
     pending.add(PendingItem(icon, label));
   }
 
-  /// Envoie la parcelle : un nom, la surface en hectares et le point central.
-  /// Le contour complet reste sur le téléphone (l'API ne garde qu'un point).
-  /// Sans fiche déjà envoyée, ou hors ligne, la parcelle reste en attente.
+  /// Envoie la parcelle si une route write existe ; sinon outbox (voir [sendPlot]).
   Future<void> _pushPlot(Producer owner, Plot plot) async {
-    final pid = owner.remoteId;
-    if (pid == null || plot.remoteId != null) return;
+    if (owner.remoteId == null || plot.remoteId != null) return;
+    final id = await sendPlot(owner, plot);
+    if (id == null) return;
+    final list = plots[owner.code] ?? const <Plot>[];
+    final i = list.indexWhere((x) => x.code == plot.code);
+    if (i >= 0) {
+      plots[owner.code] = [...list]..[i] = list[i].withRemoteId(id);
+    }
+    pending.removeWhere((x) => x.label == 'Parcelle relevée · ${plot.code}');
     try {
-      final data =
-          await Get.find<ApiClient>().post('/producers/$pid/plots', body: {
-        'name': 'Parcelle ${plot.code}',
-        'areaHa': double.parse(plot.areaHa.toStringAsFixed(4)),
-        if (owner.village.isNotEmpty) 'village': owner.village,
-        if (plot.lat != null) 'lat': plot.lat,
-        if (plot.lng != null) 'lng': plot.lng,
-      }) as Map<String, dynamic>;
-      final list = plots[owner.code] ?? const <Plot>[];
-      final i = list.indexWhere((x) => x.code == plot.code);
-      if (i >= 0) {
-        plots[owner.code] = [...list]..[i] =
-            list[i].withRemoteId(data['id'].toString());
-      }
-      pending.removeWhere((x) => x.label == 'Parcelle relevée · ${plot.code}');
-      await _pushCrops(
-          owner, plot.code); // cultures déclarées avant l'envoi de la parcelle
+      await _pushCrops(owner, plot.code);
     } on ApiException catch (e) {
-      debugPrint("[ERROR][SessionService._pushCrops] ${e}");
+      debugPrint('[ERROR][SessionService._pushPlot.crops] $e');
       lastSyncError.value = e.userMessage;
     }
   }
@@ -655,41 +796,73 @@ class SessionService extends GetxService {
 
   static const _seasonLabels = ['Horticole 2026', 'Contre-saison 2026'];
 
-  /// Synchronise les cultures d'une parcelle : crée les nouvelles, met à jour les
-  /// existantes, supprime les retirées. La part en % reste locale (pas de champ côté API).
+  /// Tente sync cultures (routes write absentes en prod). Sur NOT_FOUND → outbox.
   Future<void> _pushCrops(Producer owner, String plotCode,
       {List<Crop> removed = const []}) async {
     final pid = owner.remoteId;
     final plot = plots[owner.code]?.firstWhereOrNull((x) => x.code == plotCode);
     final plotId = plot?.remoteId;
-    if (pid == null || plotId == null)
-      return; // fiche ou parcelle de démonstration
+    if (pid == null || plotId == null) return;
     final api = Get.find<ApiClient>();
-    final keep = {
-      for (final l in cropPlans[plotCode]?.values ?? const <List<Crop>>[])
-        for (final c in l) c.remoteId
-    };
-    for (final c in removed) {
-      if (c.remoteId != null && !keep.contains(c.remoteId)) {
-        await api.request('DELETE', '/producers/$pid/crops/${c.remoteId}');
-      }
-    }
-    _removedCrops = const [];
-    final plan = cropPlans[plotCode] ?? const <int, List<Crop>>{};
-    for (final e in plan.entries) {
-      for (final c in e.value) {
-        final body = {
-          'name': c.name,
-          if (c.variety.isNotEmpty) 'variety': c.variety,
-          'season': _seasonLabels[e.key],
-        };
-        if (c.remoteId == null) {
-          final data = await api.post('/producers/$pid/crops',
-              body: {...body, 'plotId': plotId}) as Map<String, dynamic>;
-          c.remoteId = data['id'].toString();
-        } else {
-          await api.patch('/producers/$pid/crops/${c.remoteId}', body: body);
+    try {
+      final keep = {
+        for (final l in cropPlans[plotCode]?.values ?? const <List<Crop>>[])
+          for (final c in l) c.remoteId
+      };
+      for (final c in removed) {
+        if (c.remoteId != null && !keep.contains(c.remoteId)) {
+          await api.request('DELETE', '/producers/$pid/crops/${c.remoteId}');
         }
+      }
+      _removedCrops = const [];
+      final plan = cropPlans[plotCode] ?? const <int, List<Crop>>{};
+      for (final e in plan.entries) {
+        for (final c in e.value) {
+          final body = {
+            'name': c.name,
+            if (c.variety.isNotEmpty) 'variety': c.variety,
+            'season': _seasonLabels[e.key],
+            'sharePct': c.share,
+          };
+          if (c.remoteId == null) {
+            final data = await api.post('/producers/$pid/crops',
+                body: {...body, 'plotId': plotId}) as Map<String, dynamic>;
+            c.remoteId = data['id'].toString();
+          } else {
+            await api.patch('/producers/$pid/crops/${c.remoteId}', body: body);
+          }
+        }
+      }
+    } on ApiException catch (e) {
+      debugPrint('[ERROR][SessionService._pushCrops] $e');
+      lastSyncError.value = e.code == 'NOT_FOUND'
+          ? 'Envoi cultures pas encore disponible sur le serveur — gardées en local.'
+          : e.userMessage;
+      if (Get.isRegistered<OutboxService>() &&
+          (e.code == 'NOT_FOUND' || e.code == 'NETWORK')) {
+        final plan = cropPlans[plotCode] ?? const <int, List<Crop>>{};
+        await Get.find<OutboxService>().enqueueGeneric(
+          entity: 'crops',
+          operation: 'sync',
+          payload: {
+            'path': '/producers/$pid/crops',
+            'body': {
+              'plotId': plotId,
+              'crops': [
+                for (final e in plan.entries)
+                  for (final c in e.value)
+                    {
+                      'name': c.name,
+                      'variety': c.variety,
+                      'season': _seasonLabels[e.key],
+                      'sharePct': c.share,
+                    },
+              ],
+            },
+          },
+        );
+      } else if (e.code != 'NOT_FOUND' && e.code != 'NETWORK') {
+        rethrow;
       }
     }
   }
@@ -699,5 +872,43 @@ class SessionService extends GetxService {
     pending.add(PendingItem(issue.icon, 'Correction · ${issue.owner}'));
   }
 
-  void markSent() => pending.clear();
+  /// Vide la file UI seulement après un flush réussi (N > 0).
+  void markSent({int flushed = 0}) {
+    if (flushed <= 0) return;
+    pending.clear();
+  }
+
+  /// Demande de correction (`POST /producers/{id}/corrections`).
+  Future<void> submitCorrection({
+    required Producer producer,
+    required String field,
+    required String from,
+    required String to,
+    required String motif,
+  }) async {
+    final id = producer.remoteId;
+    if (id == null || id.isEmpty) {
+      queueCommerce(
+        Symbols.edit_note_rounded,
+        'Correction · ${producer.name} · $field',
+      );
+      return;
+    }
+    try {
+      await Get.find<ApiClient>().post('/producers/$id/corrections', body: {
+        'changes': [
+          {'field': field, 'from': from, 'to': to},
+        ],
+        'motif': motif,
+      });
+    } on ApiException catch (e) {
+      debugPrint('[ERROR][SessionService.submitCorrection] $e');
+      lastSyncError.value = e.userMessage;
+      queueCommerce(
+        Symbols.edit_note_rounded,
+        'Correction · ${producer.name} · $field',
+      );
+      rethrow;
+    }
+  }
 }

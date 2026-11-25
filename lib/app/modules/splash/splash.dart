@@ -23,8 +23,10 @@ class SplashController extends GetxController {
       if (role == AppRole.producer) {
         final hasSession = Get.isRegistered<ApiClient>() &&
             Get.find<ApiClient>().accessToken != null;
-        Get.offAllNamed(
-            hasSession ? Routes.producerHome : Routes.producerWelcome);
+        Get.offAllNamed(hasSession
+            ? Routes.producerHome
+            : Routes.authIntent,
+            arguments: hasSession ? null : AppRole.producer);
         return;
       }
       if (session.activated.value) {
@@ -32,7 +34,7 @@ class SplashController extends GetxController {
         return;
       }
       if (role == AppRole.technician) {
-        Get.offAllNamed(Routes.phone);
+        Get.offAllNamed(Routes.authIntent, arguments: AppRole.technician);
         return;
       }
       Get.offAllNamed(Routes.roleGate);

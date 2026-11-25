@@ -11,6 +11,7 @@ import '../../core/app_text.dart';
 import '../../core/app_theme.dart';
 import '../../data/mock_data.dart';
 import '../../routes/app_routes.dart';
+import '../../services/api_client.dart';
 import '../../services/network_service.dart';
 import '../../services/outbox_service.dart';
 import '../../services/producers_service.dart';
@@ -213,13 +214,26 @@ class NewProducerController extends GetxController {
     String? serverCode;
     String? serverId;
 
-    // Le serveur valide la création (dernier mot) : en cas d'erreur, la raison s'affiche
-    // et on peut réessayer ; « Annuler » laisse le formulaire tel quel.
+    // Création : `POST /producers` absent d’OpenAPI prod → outbox locale.
+    // Autres erreurs API : dialogue réessayer ; Annuler = rester sur le formulaire.
     final producersApi = Get.find<ProducersService>();
     var photoFailed = false;
+    final createPayload = <String, dynamic>{
+      'firstName': firstName,
+      'lastName': lastName,
+      'village': village.value,
+      'phone': phone.text,
+      if (cni.text.trim().isNotEmpty) 'cni': cni.text.trim(),
+    };
+    Future<void> enqueueLocal() async {
+      if (Get.isRegistered<OutboxService>()) {
+        await Get.find<OutboxService>().enqueueProducerCreate(createPayload);
+      }
+    }
+
     if (producersApi.canReachServer) {
       Map<String, dynamic>? remote;
-      final created = await runWithRetry(() async {
+      try {
         remote = await producersApi.create(
           firstName: firstName,
           lastName: lastName,
@@ -227,10 +241,24 @@ class NewProducerController extends GetxController {
           phone: phone.text,
           cni: cni.text.trim().isEmpty ? null : cni.text.trim(),
         );
-      }, title: 'Fiche non enregistrée');
-      if (!created) {
-        saving.value = false;
-        return;
+      } on ApiException catch (e) {
+        if (e.code == 'NOT_FOUND' || e.isNetwork) {
+          await enqueueLocal();
+        } else {
+          final created = await runWithRetry(() async {
+            remote = await producersApi.create(
+              firstName: firstName,
+              lastName: lastName,
+              village: village.value,
+              phone: phone.text,
+              cni: cni.text.trim().isEmpty ? null : cni.text.trim(),
+            );
+          }, title: 'Fiche non enregistrée');
+          if (!created) {
+            saving.value = false;
+            return;
+          }
+        }
       }
       if (remote != null) {
         synced = true;
@@ -239,20 +267,13 @@ class NewProducerController extends GetxController {
         for (final path in [cniFront.value, cniBack.value]) {
           if (serverId == null || path == null) continue;
           final sent = await runWithRetry(
-              () => producersApi.uploadCniPhoto(serverId!, path),
-              title: 'Photo de CNI non envoyée');
+              () => producersApi.uploadPhoto(serverId!, path),
+              title: 'Photo non envoyée');
           if (!sent) photoFailed = true;
         }
       }
-    } else if (Get.isRegistered<OutboxService>()) {
-      // Hors ligne : file Drift, envoi à la synchro (MO-40).
-      await Get.find<OutboxService>().enqueueProducerCreate({
-        'firstName': firstName,
-        'lastName': lastName,
-        'village': village.value,
-        'phone': phone.text,
-        if (cni.text.trim().isNotEmpty) 'cni': cni.text.trim(),
-      });
+    } else {
+      await enqueueLocal();
     }
 
     final p = Get.find<SessionService>().addProducer(

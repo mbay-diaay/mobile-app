@@ -28,6 +28,20 @@ const Map<String, String> brouillonsWo = {
   'role.producer': 'Beykat',
   'role.producerSub': 'Say tool, calendrier, laaj correct.',
   'role.footer': 'Mën nga soppi rol bi gannaaw déconnexion.',
+  'intent.title': 'Dalal ak jàmm',
+  'intent.leadTech':
+      'Duggal ak code gestionnaire, walla dellu ci sa kont.',
+  'intent.leadProd':
+      'Sos sa bérab beykat, walla dellu ak sa telefon.',
+  'intent.first': 'Beeñu maa ngi',
+  'intent.returning': 'Am naa kont',
+  'intent.firstTechSub':
+      'Code 5 chiif yu gestionnaire jox, ba noppi sa baatu jàll.',
+  'intent.returningTechSub':
+      'Telefon ak baatu jàll bi nga tànn ci njëkk.',
+  'intent.firstProdSub': 'Sos kont ak sa numero telefon.',
+  'intent.returningProdSub': 'Dugg ak telefon ak baatu jàll.',
+  'intent.footer': 'Mën nga dellu ngir soppi rol bi.',
   'auth.prod.title': 'Bérab bu beykat bi',
   'auth.prod.lead': 'Xoolal say tool, calendrier, te laaj correction.',
   'auth.prod.preview': 'Xool design (amul kont)',

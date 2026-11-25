@@ -1,6 +1,7 @@
 import 'package:get/get.dart';
 
 import '../core/app_theme.dart';
+import '../modules/activation/auth_intent.dart';
 import '../modules/activation/download.dart';
 import '../modules/activation/phone.dart';
 import '../modules/activation/pin_create.dart';
@@ -44,6 +45,13 @@ abstract final class AppPages {
       name: Routes.roleGate,
       page: () => const RoleGateView(),
       binding: BindingsBuilder.put(() => RoleGateController()),
+      transition: Transition.fadeIn,
+      transitionDuration: Motion.medium,
+    ),
+    GetPage(
+      name: Routes.authIntent,
+      page: () => const AuthIntentView(),
+      binding: BindingsBuilder.put(() => AuthIntentController()),
       transition: Transition.fadeIn,
       transitionDuration: Motion.medium,
     ),

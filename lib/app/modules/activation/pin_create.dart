@@ -110,10 +110,11 @@ class PinCreateController extends GetxController {
 
   String get subtitle => switch (phase.value) {
         _PinPhase.verifyCurrent =>
-          error.value ? 'pin.wrong'.tr : '4 chiffres',
-        _PinPhase.choose => '4 chiffres',
+          error.value ? 'pin.wrong'.tr : 'Le code à 4 chiffres que vous utilisez',
+        _PinPhase.choose =>
+          'Choisissez 4 chiffres — c’est votre code, gardez-le secret',
         _PinPhase.confirm =>
-          error.value ? 'pin.mismatch'.tr : 'Retapez le même code',
+          error.value ? 'pin.mismatch'.tr : 'Retapez le même code pour confirmer',
       };
 }
 

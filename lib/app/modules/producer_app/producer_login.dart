@@ -81,7 +81,7 @@ class ProducerLoginController extends GetxController {
       shake.value++;
     } catch (e) {
       error.value =
-          'Connexion impossible. Utilisez le compte seed ci-dessous.';
+          'Connexion impossible. Vérifiez le réseau et réessayez.';
       shake.value++;
       debugPrint('[ERROR][ProducerLogin.submit] $e');
     } finally {
@@ -94,11 +94,11 @@ class ProducerLoginController extends GetxController {
     if (e.code == 'NOT_FOUND' ||
         raw.contains('cannot post') ||
         raw.contains('/auth/producer')) {
-      return 'Compte producteur pas encore sur le serveur. Utilisez le seed Aïssa Diop.';
+      return 'Compte producteur pas encore disponible sur le serveur. Réessayez plus tard.';
     }
     final msg = e.userMessage;
     if (msg.toLowerCase().contains('cannot ') || msg.contains('/v1/')) {
-      return 'Service indisponible. Utilisez le compte seed local.';
+      return 'Service indisponible pour le moment. Réessayez plus tard.';
     }
     return msg;
   }
@@ -208,19 +208,21 @@ class ProducerLoginView extends GetView<ProducerLoginController> {
                           message: c.error.value,
                           hint: 'auth.prod.hintLogin'.tr,
                         ),
-                        const SizedBox(height: 12),
-                        Center(
-                          child: TextButton(
-                            onPressed: c.busy.value ? null : c.enterSeed,
-                            child: Text(
-                              'auth.prod.seed'.tr,
-                              textAlign: TextAlign.center,
-                              style: jakarta(13,
-                                  weight: FontWeight.w800,
-                                  color: AppColors.forest),
+                        if (!kReleaseMode) ...[
+                          const SizedBox(height: 12),
+                          Center(
+                            child: TextButton(
+                              onPressed: c.busy.value ? null : c.enterSeed,
+                              child: Text(
+                                'auth.prod.seed'.tr,
+                                textAlign: TextAlign.center,
+                                style: jakarta(13,
+                                    weight: FontWeight.w800,
+                                    color: AppColors.forest),
+                              ),
                             ),
                           ),
-                        ),
+                        ],
                         const Spacer(),
                         FadeSlideIn(
                           delay: Motion.stagger(3),

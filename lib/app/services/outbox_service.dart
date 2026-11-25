@@ -81,7 +81,7 @@ class OutboxService extends GetxService {
     final payload = jsonDecode(entry.payloadJson) as Map<String, dynamic>;
     if (entry.entity == 'producer' && entry.operation == 'create') {
       final svc = Get.find<ProducersService>();
-      await svc.create(
+      final created = await svc.create(
         firstName: payload['firstName'] as String? ??
             payload['first'] as String? ??
             '',
@@ -92,14 +92,20 @@ class OutboxService extends GetxService {
         phone: payload['phone'] as String?,
         cni: payload['cni'] as String?,
       );
+      // Sans id serveur, ne pas marquer « sent » (le flush a déjà commit).
+      if (created == null || created['id'] == null) {
+        throw StateError('Création producteur sans id serveur');
+      }
       return;
     }
-    // Autres entités : POST générique si path fourni.
+    // Autres entités : POST générique si path fourni (échoue en NOT_FOUND tant
+    // que les routes write plots/crops ne sont pas déployées).
     final path = payload['path'] as String?;
     if (path != null) {
-      await _client.post(path, body: payload['body'] ?? payload);
+      await _client.post(path, body: payload['body'] as Map<String, dynamic>? ?? payload);
       return;
     }
-    throw StateError('Mutation non supportée : ${entry.entity}/${entry.operation}');
+    throw StateError(
+        'Mutation non supportée : ${entry.entity}/${entry.operation}');
   }
 }

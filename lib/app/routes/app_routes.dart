@@ -1,6 +1,7 @@
 abstract final class Routes {
   static const splash = '/';
   static const roleGate = '/role';
+  static const authIntent = '/auth/intent';
   static const phone = '/activation/phone';
   static const smsCode = '/activation/code';
   static const pinCreate = '/activation/pin';

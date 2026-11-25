@@ -70,22 +70,50 @@ class CorrectionRequestController extends GetxController {
   }
 
   bool get valid => detail.text.trim().length >= 8;
+  final busy = false.obs;
+  final error = RxnString();
 
-  void submit() {
+  Future<void> submit() async {
     if (!valid) {
       shake.value++;
       return;
     }
-    Get.find<SessionService>().queueCommerce(
-      Symbols.edit_note_rounded,
-      'Correction · ${producer.name} · ${field.value}',
-    );
-    Get.offNamed(Routes.success, arguments: {
-      'title': 'Demande envoyée',
-      'sub':
-          '${producer.name}\n${field.value} : ${detail.text.trim()}\nSuivi au prochain envoi.',
-      'cta': "Retour à l'accueil",
-    });
+    if (busy.value) return;
+    busy.value = true;
+    error.value = null;
+    final to = detail.text.trim();
+    final from = switch (field.value) {
+      'Téléphone' => producer.phone,
+      'Village' => producer.village,
+      'Organisation' => producer.org,
+      'Âge' => producer.age > 0 ? '${producer.age}' : '—',
+      _ => '—',
+    };
+    try {
+      await Get.find<SessionService>().submitCorrection(
+        producer: producer,
+        field: field.value,
+        from: from,
+        to: to,
+        motif: 'Demande mobile · ${field.value}',
+      );
+      Get.offNamed(Routes.success, arguments: {
+        'title': 'Demande envoyée',
+        'sub':
+            '${producer.name}\n${field.value} : $to\nSuivi par votre SCOOP / technicien.',
+        'cta': "Retour à l'accueil",
+      });
+    } catch (e) {
+      error.value = 'Demande enregistrée en local — envoi serveur impossible.';
+      Get.offNamed(Routes.success, arguments: {
+        'title': 'Demande enregistrée',
+        'sub':
+            '${producer.name}\n${field.value} : $to\nEn attente de synchro.',
+        'cta': "Retour à l'accueil",
+      });
+    } finally {
+      busy.value = false;
+    }
   }
 
   @override

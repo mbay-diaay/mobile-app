@@ -175,7 +175,7 @@ class AuthService extends GetxService {
         raw.contains('not found')) {
       return ApiException(
         'NOT_FOUND',
-        'Compte producteur pas encore sur le serveur. Utilisez le seed Aïssa Diop (77 000 00 00).',
+        'Compte producteur pas encore disponible sur le serveur. Réessayez plus tard ou demandez un accès à votre SCOOP.',
         status: e.status ?? 404,
       );
     }
