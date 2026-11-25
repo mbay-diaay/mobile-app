@@ -146,18 +146,18 @@ Comptes : `mbay-diaay-api/docs/COMPTES_RECETTE.md` (prod : souvent `INVALID_CRED
 
 ## 5. Pas fait / goulots
 
-1. Auth producteur API (Aldrich)  
-2. CRUD producers / plots / crops **sur prod** (Aldrich)  
+1. Auth producteur API (Aldrich) — UI + messages prêts ; endpoints absents en prod  
+2. CRUD producers / plots / crops **sur prod** (Aldrich) — outbox locale en attendant  
 3. Seed comptes démo prod (Aldrich)  
 4. Sync : réconciliation id serveur après flush + `LocalProducers` au boot  
-5. Connectivité réelle  
+5. Connectivité réelle (`connectivity_plus`)  
 6. Correction / commerce branchés API  
 7. Tests auto  
-8. Findings revue soir (voir §7) : cold start producteur, switch rôle sans logout, todo = MockData, `markSent` trop agressif  
-9. ~~Dettes session dual-rôle~~ → **corrigées** (23/11)  
-10. ~~Commit WIP~~ → **fait** (23/11 soir) ; push = à décider demain  
+8. ~~switch rôle sans logout~~ → **corrigé** (25/11 : `revoke`)  
+9. ~~Dettes session dual-rôle / auth intent / download fictif / PIN hint~~ → **corrigées** (25/11)  
+10. ~~Push branche mobile~~ → **fait** (`chore/phase2-auth-cleanup`, PR #1)  
 
-**Web** : Aldrich seul — ne pas toucher depuis le chantier mobile.
+**Web** : correction statut techniciens sur `fix/techniciens-sync-statut` (PR #14 front).
 
 ---
 
