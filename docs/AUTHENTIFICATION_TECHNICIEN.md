@@ -2,7 +2,7 @@
 
 Périmètre : connexion, session et déverrouillage uniquement. API : `https://api.mbaydiaay.com/v1` (surcharge : `--dart-define=API_URL=…`).
 
-> Conception décidée ; le code du mobile suit cette page. Les points de la section « Points ouverts » ne sont **pas** réglés.
+> Conception décidée ; le code du mobile suit cette page (activate / sign-in / refresh / me / logout branchés). Page publique : https://www.mbaydiaay.com/docs/authentification-mobile.html. Les points de la section « Points ouverts » ne sont **pas** tous réglés côté API.
 
 ## Parcours
 

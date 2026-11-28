@@ -1,65 +1,71 @@
 # Intégration API · Mbay Diaay
 
-API : `https://api.mbaydiaay.com/v1` (production). Pour viser une API locale : `flutter run --dart-define=API_URL=http://10.0.2.2:3000/v1` (émulateur Android) ou `http://localhost:3000/v1` (simulateur iOS). Contrat de référence : `docs/openapi.json` du dépôt `mbay-diaay/mbay-diaay-api`.
+API : `https://api.mbaydiaay.com/v1` (production).  
+Surcharge : `flutter run --dart-define=API_URL=http://10.0.2.2:3000/v1` (émulateur Android) ou `http://localhost:3000/v1` (simulateur iOS).
 
-### Ce qui est fait
+**Contrat de référence prod** : [OpenAPI Swagger](https://api.mbaydiaay.com/v1/docs) · JSON `GET /v1/docs-json` (126 paths, audit **25 nov. 2026**).  
+**Auth technicien** : [authentification-mobile.html](https://www.mbaydiaay.com/docs/authentification-mobile.html) · `docs/AUTHENTIFICATION_TECHNICIEN.md`.
+
+---
+
+## Matrice contrat OpenAPI prod ↔ mobile (25/11)
+
+| Domaine | OpenAPI prod | Mobile |
+|---|---|---|
+| Auth technicien | `POST /auth/technician/activate`, `sign-in`, `refresh`, `logout` · `GET /me` | Branché |
+| Auth e-mail (test) | `sign-in` + `otp/*` | Conservé (mode test) |
+| Auth producteur | **absent** | Seed local + message 404 |
+| Annuaire | `GET /producers` (page/limit), `GET /producers/{id}` | Lecture + cache ; mapping `ProducerDto` |
+| Édition fiche | `PATCH /producers/{id}` (`UpdateProducerDto`) | Branché (fiches avec `remoteId`) |
+| Création fiche | **pas de `POST /producers`** | Local + outbox ; pas de faux succès serveur |
+| Parcelles | `GET /plots?producerId=` · `GET /plots/{id}` | Lecture branchée ; **pas** de POST write |
+| Cultures | dans `PlotDto.crops` (`sharePct`, saisons) | Lecture ; édition locale + outbox |
+| Corrections | `POST /producers/{id}/corrections` | Branché |
+| Photo | `PUT /producers/{id}/photo` (multipart) | Branché (remplace `/cni/photo`) |
+| Devices | `POST /devices/register` | Branché |
+| CNI reveal | `POST /producers/{id}/cni/reveal` | Pas encore UI terrain |
+
+---
+
+## Ce qui est fait (client)
 
 | Domaine | Détail | Fichier |
 |---|---|---|
-| Client HTTP | En-tête `Authorization: Bearer`, délai de 20 s, erreurs `{code, message}` converties en messages français (`ApiException.userMessage`), réseau coupé = code `NETWORK`. | `services/api_client.dart` |
-| Session | Jetons gardés dans le stockage sécurisé de l'appareil (`flutter_secure_storage`). Sur 401, renouvellement automatique via `/auth/refresh` puis nouvel essai. Si le renouvellement échoue, retour à l'écran de connexion. | `services/api_client.dart`, `main.dart` |
-| Connexion | Parcours technicien (voir `AUTHENTIFICATION_TECHNICIEN.md`) : `POST /auth/technician/activate` (téléphone + code à 5 chiffres + mot de passe) puis `POST /auth/technician/sign-in` (téléphone + mot de passe), puis `GET /me`. Ancien parcours conservé pour les comptes de test : `POST /auth/sign-in`, `POST /auth/otp/verify`, `/auth/otp/resend`. | `services/auth_service.dart`, `modules/activation/phone.dart`, `sms_code.dart` |
-| Écrans | Écran 01 : trois modes (première connexion, connexion, compte e-mail de test). Écran 02 : code e-mail, ancien parcours seulement. Les écrans 03 (PIN) et 04 (téléchargement) restent identiques. Le profil affiche l'e-mail. | `modules/activation/`, `modules/shell/profile.dart` |
-| Producteurs | `GET /producers` et `GET /scoops`, mis en cache dans `shared_preferences` : l'annuaire reste consultable hors ligne. Rafraîchi à l'écran 04 et à l'ouverture de l'accueil. Les fiches créées sur le téléphone restent en tête. | `services/producer_repository.dart`, `services/session_service.dart` |
-| Révocation | Prévient l'API (`/auth/logout`), supprime les jetons et le cache. | `services/session_service.dart` |
-| Android | Permission `INTERNET` ajoutée au manifeste. | `android/app/src/main/AndroidManifest.xml` |
+| Client HTTP | Bearer, timeout 20 s, `ApiException.userMessage`, `NETWORK`, refresh sur 401 (pas de déco sur 429/5xx/réseau) | `services/api_client.dart` |
+| Session | Jetons `flutter_secure_storage` ; refresh refusé → reconnexion | `api_client.dart`, `main.dart` |
+| Connexion tech | activate / sign-in / me / PIN / download | `auth_service.dart`, `modules/activation/` |
+| Producteurs | `GET /producers` paginé + cache offline | `producer_repository.dart` |
+| Parcelles | `GET /plots?producerId=` | `session_service.dart` `loadPlots` |
+| Sync | Outbox Drift ; `markSent` seulement si flush N > 0 | `outbox_service.dart`, `sync.dart` |
 
-### Limites actuelles de l'API
+---
 
-- La fiche producteur ne contient que : `id`, `code`, prénom, nom, `scoopId`, statut, CNI masquée. Village, âge, téléphone, sexe et organisation s'affichent donc vides ou par défaut.
-- `PATCH /producers/:id` est un « stub » : il ne sauvegarde rien.
-- Aucune route pour créer un producteur, ni pour les parcelles, les cultures, les photos CNI ou la synchronisation hors ligne.
-- Le compte de démonstration est un admin sans SCOOP : le rôle « technicien » n'a pas été vu.
-- Le code d'erreur d'une session invalide est `UNAUTHORIZED` (le guide annonce `UNAUTHENTICATED`) : l'app gère les deux.
+## Limites API prod (bloquantes terrain write)
 
-### Ce qui reste à faire
+1. **Pas de `POST /producers`** — nouvelle fiche reste locale / outbox en erreur `NOT_FOUND`.
+2. **Pas de write plots/crops** — relevé GPS et cultures restent sur l’appareil jusqu’à déploiement.
+3. **Pas de `/auth/producer/*`** — parcours producteur = seed / aperçu design.
+4. `/auth/logout` ne révoque toujours pas le refresh côté serveur (point ouvert doc auth).
 
-**Côté mobile, dès que l'API le permet**
-1. Créer un producteur (écran « Nouveau producteur ») : envoyer la fiche et les photos CNI.
-2. Modifier et archiver un producteur : brancher `PATCH /producers/:id` quand il enregistrera vraiment.
-3. Parcelles : envoyer le contour GPS et la surface relevés.
-4. Cultures : envoyer les cultures déclarées par saison.
-5. File d'envoi hors ligne : aujourd'hui « En attente d'envoi » et « À corriger » sont des données de démonstration. Il faut une vraie file (stockée sur l'appareil), envoyée au retour du réseau, avec gestion des conflits.
-6. Réseau réel : remplacer la simulation « Réseau (simulation) » par la vraie détection de connexion.
-7. Accueil, « À compléter » et « Carte » : brancher les compteurs et listes sur de vraies données (ils utilisent encore `MockData`).
-8. Détail du producteur : afficher les champs réels (statut, CNI masquée), et la révélation de la CNI (`POST /producers/:id/cni/reveal`, avec motif) si le rôle le permet.
-9. Permissions : adapter les écrans selon `permissions[]` de `/me` (accès refusé = `FORBIDDEN`).
-10. Liste des producteurs : pagination par curseur côté interface (le curseur est déjà géré en lecture).
-11. PIN : déjà conservé dans le stockage sécurisé (`flutter_secure_storage`) ; l'ancien PIN en clair de `shared_preferences` est migré au démarrage. Fait.
-12. Tests : aucun test automatique à ce jour (client HTTP, renouvellement de session, cache).
-13. Vérification sur appareils réels, Android et iOS, puis build iOS (non compilé depuis l'ajout du stockage sécurisé).
+---
 
-**À demander à l'équipe backend**
-- Connexion technicien : l'API fournit téléphone + code à 5 chiffres puis téléphone + mot de passe. Reste côté API : révocation du jeton de renouvellement à la déconnexion, rotation, blocage après essais faux sur `technician/sign-in`.
-- Une fiche producteur complète (village, âge, téléphone, sexe, organisation).
-- Routes de création et de modification de producteur, de parcelles et de cultures.
-- Routes de synchronisation hors ligne.
-- Un compte de test avec le rôle technicien et une SCOOP.
+## Message Aldrich
 
-### Mise à jour (compte technicien et CRUD producteurs)
+> Priorités API bloquantes mobile : (1) `POST /producers` (+ write plots/crops alignés `PlotDto`), (2) `/auth/producer/register` + `sign-in`, (3) reseeder comptes démo tech/prod. Sans ça, le terrain reste **lecture + PATCH/corrections + outbox locale**.
 
-Compte technicien : `fatou.sarr@cradesc.example` (rôle `technicien`, SCOOP `s1`).
+---
 
-**Branché**
-- Nom de la SCOOP lu dans `GET /me` (`scoopName`), affiché dans le profil.
-- Fiches complètes : téléphone, village, date de création, identifiant API (`Producer.remoteId`).
-- Nouvelle fiche : enregistrée sur le téléphone, puis envoyée par `POST /producers` (prénom, nom, téléphone, village). Hors ligne ou refusée, elle reste « En attente d'envoi ».
-- Modification : `PATCH /producers/:id` pour les fiches déjà connues de l'API.
+## Compte de test (réf.)
 
-**Pas encore branché**
-- Parcelles (`/producers/:id/plots`) : l'API garde un point (`lat`, `lng`) et `areaHa`, notre relevé produit un contour. Format du contour à confirmer.
-- Cultures (`/producers/:id/crops`) : pas de part en %, saison en texte (« 2025-2026 »).
-- Archivage : l'API n'a que `DELETE`, pas d'état « archivé ».
-- Photos CNI (`/cni/photo`, multipart) et révélation de la CNI.
-- Renvoi automatique des envois en attente quand le réseau revient.
-- Le contrat `docs/openapi.json` du dépôt API n'est pas à jour pour ces routes : les champs ont été vérifiés par les erreurs de validation.
+- Technicien e-mail (si seed prod OK) : `fatou.sarr@cradesc.example` / `Demonstration2026` / OTP `000000`
+- Seed local app : Fatou Sarr, PIN `1234` (sans API)
+
+---
+
+## Suite mobile (hors ce lot)
+
+- Connectivité réelle (`connectivity_plus`)
+- Permissions UI depuis `GET /me`
+- Révélation CNI / téléphone
+- Réconciliation `remoteId` après flush quand create existera
+- Tests auto client HTTP / refresh

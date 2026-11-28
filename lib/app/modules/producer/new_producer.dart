@@ -11,7 +11,9 @@ import '../../core/app_text.dart';
 import '../../core/app_theme.dart';
 import '../../data/mock_data.dart';
 import '../../routes/app_routes.dart';
+import '../../services/api_client.dart';
 import '../../services/network_service.dart';
+import '../../services/outbox_service.dart';
 import '../../services/producers_service.dart';
 import '../../services/session_service.dart';
 import '../../widgets/animations.dart';
@@ -212,13 +214,44 @@ class NewProducerController extends GetxController {
     String? serverCode;
     String? serverId;
 
-    // Le serveur valide la création (dernier mot) : en cas d'erreur, la raison s'affiche
-    // et on peut réessayer ; « Annuler » laisse le formulaire tel quel.
+    // Création : `POST /producers` absent d’OpenAPI prod → outbox locale.
+    // Autres erreurs API : dialogue réessayer ; Annuler = rester sur le formulaire.
     final producersApi = Get.find<ProducersService>();
     var photoFailed = false;
+    final createPayload = <String, dynamic>{
+      'firstName': firstName,
+      'lastName': lastName,
+      'village': village.value,
+      'phone': phone.text,
+      if (cni.text.trim().isNotEmpty) 'cni': cni.text.trim(),
+    };
+    // Persiste les CNI hors cache temporaire (sinon perdues hors ligne).
+    String? frontPath;
+    String? backPath;
+    if (Get.isRegistered<OutboxService>()) {
+      final outbox = Get.find<OutboxService>();
+      if (cniFront.value != null) {
+        frontPath =
+            await outbox.persistCniPhoto(cniFront.value!, side: 'front');
+      }
+      if (cniBack.value != null) {
+        backPath = await outbox.persistCniPhoto(cniBack.value!, side: 'back');
+      }
+    }
+
+    Future<void> enqueueLocal() async {
+      if (Get.isRegistered<OutboxService>()) {
+        await Get.find<OutboxService>().enqueueProducerCreate({
+          ...createPayload,
+          if (frontPath != null) 'cniFrontPath': frontPath,
+          if (backPath != null) 'cniBackPath': backPath,
+        });
+      }
+    }
+
     if (producersApi.canReachServer) {
       Map<String, dynamic>? remote;
-      final created = await runWithRetry(() async {
+      try {
         remote = await producersApi.create(
           firstName: firstName,
           lastName: lastName,
@@ -226,23 +259,49 @@ class NewProducerController extends GetxController {
           phone: phone.text,
           cni: cni.text.trim().isEmpty ? null : cni.text.trim(),
         );
-      }, title: 'Fiche non enregistrée');
-      if (!created) {
-        saving.value = false;
-        return;
+      } on ApiException catch (e) {
+        if (e.code == 'NOT_FOUND' || e.isNetwork) {
+          await enqueueLocal();
+        } else {
+          final created = await runWithRetry(() async {
+            remote = await producersApi.create(
+              firstName: firstName,
+              lastName: lastName,
+              village: village.value,
+              phone: phone.text,
+              cni: cni.text.trim().isEmpty ? null : cni.text.trim(),
+            );
+          }, title: 'Fiche non enregistrée');
+          if (!created) {
+            saving.value = false;
+            return;
+          }
+        }
       }
       if (remote != null) {
         synced = true;
         serverCode = remote!['code'] as String?;
         serverId = remote!['id'] as String?;
-        for (final path in [cniFront.value, cniBack.value]) {
+        for (final path in [frontPath ?? cniFront.value, backPath ?? cniBack.value]) {
           if (serverId == null || path == null) continue;
           final sent = await runWithRetry(
-              () => producersApi.uploadCniPhoto(serverId!, path),
-              title: 'Photo de CNI non envoyée');
-          if (!sent) photoFailed = true;
+              () => producersApi.uploadPhoto(serverId!, path),
+              title: 'Photo non envoyée');
+          if (!sent) {
+            photoFailed = true;
+            // Garde en outbox pour un prochain flush.
+            if (Get.isRegistered<OutboxService>()) {
+              await Get.find<OutboxService>().enqueueGeneric(
+                entity: 'producer_photo',
+                operation: 'upload',
+                payload: {'producerId': serverId, 'path': path},
+              );
+            }
+          }
         }
       }
+    } else {
+      await enqueueLocal();
     }
 
     final p = Get.find<SessionService>().addProducer(
@@ -257,6 +316,8 @@ class NewProducerController extends GetxController {
       code: serverCode,
       remoteId: serverId,
       synced: synced,
+      // API ou outbox déjà gérés ci-dessus — pas de second POST.
+      queueRemote: false,
     );
     saving.value = false;
     Get.offNamed(Routes.success, arguments: {

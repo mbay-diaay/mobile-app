@@ -208,6 +208,28 @@ class _SurveyDoneViewState extends State<SurveyDoneView> {
                                 }),
                           ),
                         ),
+                        const SizedBox(height: 10),
+                        FadeSlideIn(
+                          delay: const Duration(milliseconds: 1050),
+                          child: FlatButton(
+                            label: 'Valider la géométrie',
+                            icon: Symbols.verified_rounded,
+                            height: 48,
+                            onTap: () => Get.toNamed(Routes.plotValidate,
+                                arguments: {
+                                  'owner': owner,
+                                  'plot': Plot(
+                                    code,
+                                    '≈ ${area.toStringAsFixed(2).replaceAll('.', ',')} ha',
+                                    '—',
+                                    'Relevée',
+                                    AppColors.blueSoft,
+                                    AppColors.blueInk,
+                                    areaHa: area,
+                                  ),
+                                }),
+                          ),
+                        ),
                         const SizedBox(height: 12),
                         Center(
                           child: GestureDetector(

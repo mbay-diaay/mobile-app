@@ -779,7 +779,7 @@ class _PlotsTab extends StatelessWidget {
             scale: .9,
             child: Pressable(
               scale: .97,
-              onTap: () => c.openCrops(plot),
+              onTap: () => _plotActions(c, plot),
               child: Container(
                 margin: const EdgeInsets.only(bottom: 8),
                 padding: const EdgeInsets.all(12),
@@ -826,6 +826,62 @@ class _PlotsTab extends StatelessWidget {
           ),
         ),
       ]);
+
+  Future<void> _plotActions(ProducerDetailController c, Plot plot) async {
+    final action = await Get.bottomSheet<String>(
+      Container(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+        decoration: const BoxDecoration(
+          color: AppColors.cream,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            width: 40,
+            height: 4,
+            margin: const EdgeInsets.only(bottom: 14),
+            decoration: BoxDecoration(
+                color: AppColors.handle,
+                borderRadius: BorderRadius.circular(99)),
+          ),
+          Text(plot.title, style: jakarta(16, weight: FontWeight.w800)),
+          const SizedBox(height: 12),
+          ListTile(
+            leading: const IconTile(Symbols.potted_plant_rounded, size: 40),
+            title: Text('Cultures', style: jakarta(14, weight: FontWeight.w700)),
+            onTap: () => Get.back(result: 'crops'),
+          ),
+          ListTile(
+            leading: const IconTile(Symbols.verified_rounded, size: 40),
+            title: Text('Valider la géométrie',
+                style: jakarta(14, weight: FontWeight.w700)),
+            onTap: () => Get.back(result: 'validate'),
+          ),
+          ListTile(
+            leading:
+                const IconTile(Symbols.calendar_month_rounded, size: 40),
+            title: Text('Calendrier cultural',
+                style: jakarta(14, weight: FontWeight.w700)),
+            onTap: () => Get.back(result: 'calendar'),
+          ),
+        ]),
+      ),
+    );
+    switch (action) {
+      case 'crops':
+        return c.openCrops(plot);
+      case 'validate':
+        Get.toNamed(Routes.plotValidate,
+            arguments: {'owner': c.p.value, 'plot': plot});
+      case 'calendar':
+        Get.toNamed(Routes.cropCalendar, arguments: {
+          'crop': plot.crops.split(',').first.trim().isEmpty
+              ? 'Culture'
+              : plot.crops.split(',').first.trim(),
+          'plot': plot.code,
+        });
+    }
+  }
 }
 
 class _AlertsTab extends StatelessWidget {

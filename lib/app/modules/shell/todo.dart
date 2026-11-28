@@ -13,24 +13,45 @@ import '../../widgets/buttons.dart';
 import '../../widgets/layout.dart';
 import 'shell.dart';
 
-/// 22 · À compléter, avec filtres Tout / Fiches / Parcelles.
+/// 22 · À compléter — seed MockData ou todos dérivés de la session API.
 class TodoController extends GetxController {
   final filter = 0.obs;
+  final session = Get.find<SessionService>();
+
+  List<TodoItem> get _all => session.buildTodos();
 
   List<TodoItem> get items => switch (filter.value) {
-        1 => MockData.todos.where((t) => !t.isPlot).toList(),
-        2 => MockData.todos.where((t) => t.isPlot).toList(),
-        _ => MockData.todos,
+        1 => _all.where((t) => !t.isPlot).toList(),
+        2 => _all.where((t) => t.isPlot).toList(),
+        _ => _all,
       };
 
   void open(TodoItem t) {
     if (t.isPlot) {
-      Get.toNamed(Routes.survey);
+      final bits = t.subtitle.split(' · ');
+      final code = bits.first;
+      final ownerName = bits.length > 1 ? bits[1] : bits.first;
+      final owner = session.activeProducers
+              .firstWhereOrNull((p) => p.name == ownerName || p.code == code) ??
+          session.activeProducers.firstWhereOrNull((p) => true);
+      if (owner == null) return;
+      final plot = session.plotsOf(owner).firstWhereOrNull((p) => p.code == code) ??
+          Plot(
+            code.startsWith('PA') ? code : session.nextPlotCode(),
+            '—',
+            '—',
+            'À reprendre',
+            AppColors.amberSoft,
+            AppColors.amberInk,
+          );
+      Get.toNamed(Routes.plotValidate, arguments: {
+        'owner': owner,
+        'plot': plot,
+      });
     } else {
       final name = t.subtitle.split(' · ').first;
-      final p = MockData.producers.firstWhereOrNull((p) => p.name == name) ??
-          MockData.producers[5];
-      Get.toNamed(Routes.producer, arguments: p);
+      final p = session.activeProducers.firstWhereOrNull((p) => p.name == name);
+      if (p != null) Get.toNamed(Routes.producer, arguments: p);
     }
   }
 }
@@ -41,119 +62,114 @@ class TodoTab extends GetView<TodoController> {
   @override
   Widget build(BuildContext context) {
     final s = Get.find<SessionService>();
-    final all = MockData.todos.length;
-    final plots = MockData.todos.where((t) => t.isPlot).length;
-    final labels = [
-      'Tout · $all',
-      'Fiches · ${all - plots}',
-      'Parcelles · $plots'
-    ];
-    return Column(children: [
-      DarkHeader(
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Expanded(
-                child: Text('À compléter',
-                    style: display(26, color: Colors.white))),
-            Obx(() => s.toFix.isEmpty
-                ? const SizedBox.shrink()
-                : Chip2(
-                    label: '${s.toFix.length} à corriger',
-                    icon: Symbols.error_rounded,
-                    onTap: () => Get.toNamed(Routes.sync))),
-          ]),
-          const SizedBox(height: 8),
-          Text('Fiches et parcelles de votre SCOOP à reprendre.',
-              style: jakarta(12, color: AppColors.white(.7))),
-          const SizedBox(height: 12),
-          Obx(() => Row(children: [
+    return Obx(() {
+      final allItems = s.buildTodos();
+      final all = allItems.length;
+      final plots = allItems.where((t) => t.isPlot).length;
+      final labels = [
+        'Tout · $all',
+        'Fiches · ${all - plots}',
+        'Parcelles · $plots'
+      ];
+      return Column(children: [
+        DarkHeader(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Expanded(
+                  child: Text('À compléter',
+                      style: display(26, color: Colors.white))),
+              Obx(() => s.toFix.isEmpty
+                  ? const SizedBox.shrink()
+                  : Chip2(
+                      label: '${s.toFix.length} à corriger',
+                      icon: Symbols.error_rounded,
+                      onTap: () => Get.toNamed(Routes.sync))),
+            ]),
+            const SizedBox(height: 14),
+            Obx(() {
+              final f = controller.filter.value;
+              return Row(
+                  children: [
                 for (var i = 0; i < labels.length; i++) ...[
-                  if (i > 0) const SizedBox(width: 6),
-                  Chip2(
-                    label: labels[i],
-                    bg: controller.filter.value == i
-                        ? AppColors.lime
-                        : AppColors.white(.1),
-                    fg: controller.filter.value == i
-                        ? AppColors.forest
-                        : Colors.white,
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  if (i > 0) const SizedBox(width: 8),
+                  Pressable(
                     onTap: () => controller.filter.value = i,
+                    child: Chip2(
+                      label: labels[i],
+                      bg: f == i ? AppColors.lime : AppColors.white(.12),
+                      fg: f == i ? AppColors.forest : Colors.white,
+                    ),
                   ),
                 ],
-              ])),
-        ]),
-      ),
-      Expanded(
-        child: Obx(() {
-          final list = controller.items;
-          return ListView.separated(
-            key: ValueKey(controller.filter.value),
-            physics: const BouncingScrollPhysics(),
-            padding:
-                EdgeInsets.fromLTRB(16, 12, 16, ShellView.bottomInset(context)),
-            itemCount: list.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 10),
-            itemBuilder: (_, i) {
-              final t = list[i];
-              return FadeSlideIn(
-                delay: Motion.stagger(i, step: 55, base: 100),
-                offset: const Offset(0, 30),
-                scale: .9,
-                child: Pressable(
-                  scale: .97,
-                  onTap: () => controller.open(t),
-                  child: Container(
-                    padding: const EdgeInsets.fromLTRB(14, 16, 10, 16),
-                    decoration: BoxDecoration(
+              ]);
+            }),
+          ]),
+        ),
+        Expanded(
+          child: Obx(() {
+            final rows = controller.items;
+            if (rows.isEmpty) {
+              return Center(
+                child: Text(
+                  s.usingDemoCatalog.value
+                      ? 'Rien à compléter'
+                      : 'Aucune tâche — annuaire à jour',
+                  style: jakarta(14, color: AppColors.muted),
+                ),
+              );
+            }
+            return ListView.separated(
+              padding: EdgeInsets.fromLTRB(
+                  16, 16, 16, ShellView.bottomInset(context) + 16),
+              itemCount: rows.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 10),
+              itemBuilder: (_, i) {
+                final t = rows[i];
+                return FadeSlideIn(
+                  delay: Motion.stagger(i, base: 40, step: 40),
+                  child: Pressable(
+                    onTap: () => controller.open(t),
+                    child: Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
                         color: Colors.white,
-                        borderRadius: BorderRadius.circular(24)),
-                    child: Row(children: [
-                      IconTile(t.icon,
-                          size: 48,
-                          radius: 16,
-                          bg: t.bg,
-                          fg: t.ink,
-                          iconSize: 24),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(children: [
+                        Container(
+                          width: 44,
+                          height: 44,
+                          decoration: BoxDecoration(
+                            color: t.bg,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Sym(t.icon, size: 22, color: t.ink),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(t.title,
-                                  style: jakarta(15,
-                                      weight: FontWeight.w800,
-                                      height: 1.25,
-                                      tracking: -.01)),
-                              const SizedBox(height: 4),
-                              Row(children: [
-                                Sym(
-                                    t.isPlot
-                                        ? Symbols.pentagon_rounded
-                                        : Symbols.person_rounded,
-                                    size: 14,
-                                    color: AppColors.muted),
-                                const SizedBox(width: 4),
-                                Expanded(
-                                    child: Text(t.subtitle,
-                                        style: jakarta(12.5,
-                                            color: AppColors.muted),
-                                        overflow: TextOverflow.ellipsis)),
-                              ]),
-                            ]),
-                      ),
-                      const SizedBox(width: 6),
-                      const Sym(Symbols.chevron_right_rounded,
-                          size: 24, color: AppColors.faint),
-                    ]),
+                                  style:
+                                      jakarta(14, weight: FontWeight.w800)),
+                              Text(t.subtitle,
+                                  style:
+                                      jakarta(12, color: AppColors.muted)),
+                            ],
+                          ),
+                        ),
+                        const Sym(Symbols.chevron_right_rounded,
+                            size: 22, color: AppColors.muted),
+                      ]),
+                    ),
                   ),
-                ),
-              );
-            },
-          );
-        }),
-      ),
-    ]);
+                );
+              },
+            );
+          }),
+        ),
+      ]);
+    });
   }
 }

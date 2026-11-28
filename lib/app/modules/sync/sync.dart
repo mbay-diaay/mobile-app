@@ -8,6 +8,7 @@ import '../../core/app_theme.dart';
 import '../../data/mock_data.dart';
 import '../../routes/app_routes.dart';
 import '../../services/network_service.dart';
+import '../../services/outbox_service.dart';
 import '../../services/session_service.dart';
 import '../../widgets/animations.dart';
 import '../../widgets/buttons.dart';
@@ -21,6 +22,7 @@ class SyncController extends GetxController
   late final AnimationController send = AnimationController(
       vsync: this, duration: const Duration(milliseconds: 3600));
   final sent = false.obs;
+  var _lastFlushed = 0;
   late final Worker _w;
 
   @override
@@ -28,8 +30,9 @@ class SyncController extends GetxController
     super.onInit();
     send.addStatusListener((s) {
       if (s == AnimationStatus.completed) {
-        session.markSent();
-        sent.value = true;
+        // Ne vide la file UI que si le flush a vraiment envoyé quelque chose.
+        session.markSent(flushed: _lastFlushed);
+        sent.value = _lastFlushed > 0;
       }
     });
     _w = ever(net.online, (_) => _maybeSend());
@@ -41,10 +44,17 @@ class SyncController extends GetxController
     _maybeSend();
   }
 
-  void _maybeSend() {
+  Future<void> _maybeSend() async {
     if (net.online.value && session.pending.isNotEmpty && !send.isAnimating) {
-      Future.delayed(
-          const Duration(milliseconds: 500), () => send.forward(from: 0));
+      _lastFlushed = 0;
+      if (Get.isRegistered<OutboxService>()) {
+        _lastFlushed = await Get.find<OutboxService>().flush();
+      }
+      // Animation « envoyé » seulement si au moins une mutation est partie.
+      if (_lastFlushed > 0) {
+        Future.delayed(
+            const Duration(milliseconds: 500), () => send.forward(from: 0));
+      }
     } else if (!net.online.value) {
       send.stop();
     }
@@ -117,13 +127,25 @@ class SyncView extends GetView<SyncController> {
                                   weight: FontWeight.w700,
                                   color: Colors.white))),
                       Chip2(
-                        label: online ? 'Réseau' : 'Hors ligne',
+                        label: online
+                            ? 'offline.networkOn'.tr
+                            : 'offline.network'.tr,
                         icon: online
                             ? Symbols.wifi_rounded
                             : Symbols.wifi_off_rounded,
                         bg: AppColors.white(.1),
                         fg: Colors.white,
-                        onTap: controller.net.toggle,
+                        onTap: () {
+                          controller.net.toggle();
+                          showToast(
+                            controller.net.online.value
+                                ? 'offline.toastOn'.tr
+                                : 'offline.toastOff'.tr,
+                            icon: controller.net.online.value
+                                ? Symbols.wifi_rounded
+                                : Symbols.wifi_off_rounded,
+                          );
+                        },
                       ),
                     ]),
                     const SizedBox(height: 14),

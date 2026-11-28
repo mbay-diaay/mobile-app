@@ -2,9 +2,11 @@
 
 ## Project Overview
 
-Flutter + GetX field-technician app (offline prototype, no API calls). UI text and code comments in French. Based on "Mbay Diaay Mobile v2" mockup (forest green, lemon accent, cream background, big numbers, very rounded cards, expressive animations).
+Flutter + GetX field-technician app (Phase 2). Auth API réelle : téléphone + code 5 chiffres / mot de passe. UI text and code comments in French. Based on "Mbay Diaay Mobile v2" mockup (forest green, lemon accent, cream background). Producteur = **autre app** (hors ce dépôt).
 
-**Tech stack**: Flutter 3.27+, Dart ≥ 3.6, GetX 4.6.6, camera, geolocator, image_picker, maps_toolkit, shared_preferences, material_symbols_icons.
+**Tech stack**: Flutter 3.27+, Dart ≥ 3.6, GetX 4.6.6, http, flutter_secure_storage, camera, geolocator, image_picker, maps_toolkit, shared_preferences, material_symbols_icons.
+
+**Auth doc**: `docs/AUTHENTIFICATION_TECHNICIEN.md` · https://www.mbaydiaay.com/docs/authentification-mobile.html · Phase 2 : `docs/PHASE2.md`.
 
 ## Commands (essential)
 
@@ -23,7 +25,7 @@ dart format lib                          # Format code
 - **One file per screen** in `lib/app/modules/<domain>/`: each file holds both the `GetxController` and the `GetView<Controller>`.
 - **Domains**: `activation`, `lock`, `shell`, `producer`, `survey`, `sync`, `splash`.
 - **`lib/main.dart`**: registers two permanent `GetxService`s (`NetworkService`, `SessionService`) before `runApp`, then starts `GetMaterialApp` at `Routes.splash`.
-- **`SessionService`** is the in-memory "database" (`RxList`/`RxMap`): signed-in `TestAccount`, PIN, failed attempts (3 → blocked screen), producers, recently seen, pending uploads, issues to fix, plots and crops. Only activation (phone, PIN, `activated` flag) is persisted with `shared_preferences`.
+- **`SessionService`** is the in-memory "database" (`RxList`/`RxMap`): signed-in `TestAccount`, PIN, failed attempts (3 → blocked screen), producers, recently seen, pending uploads, issues to fix, plots and crops. Activation metadata (`activated`, account display) uses `shared_preferences` ; **PIN and API tokens** use `flutter_secure_storage` (Keystore / Keychain).
 - **`NetworkService.online`** simulates connectivity (`true.obs`, toggleable from Profil).
 - **Seed data**: `app/data/mock_data.dart` (fictional producers, alerts, GPS contours, sync issues).
 - **Design system** in `app/core/`:

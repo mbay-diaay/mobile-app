@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -6,6 +8,8 @@ import '../../core/app_colors.dart';
 import '../../core/app_text.dart';
 import '../../core/app_theme.dart';
 import '../../routes/app_routes.dart';
+import '../../services/api_client.dart';
+import '../../services/auth_service.dart';
 import '../../services/session_service.dart';
 import '../../widgets/animations.dart';
 import '../../widgets/layout.dart';
@@ -15,10 +19,51 @@ class SplashController extends GetxController {
   @override
   void onReady() {
     super.onReady();
-    // Téléphone déjà activé : on va droit au PIN, sans refaire l'activation.
-    final activated = Get.find<SessionService>().activated.value;
-    Future.delayed(const Duration(milliseconds: 2600),
-        () => Get.offAllNamed(activated ? Routes.unlock : Routes.phone));
+    final session = Get.find<SessionService>();
+    Future.delayed(const Duration(milliseconds: 2600), () {
+      final role = session.appRole.value;
+      // Producteur d’abord : jamais le PIN technicien, même si activated est vrai.
+      if (role == AppRole.producer) {
+        final api = Get.isRegistered<ApiClient>() ? Get.find<ApiClient>() : null;
+        final persisted = session.producerUser.value;
+        // Exige un jeton réel (API ou local:) — pas seulement le profil persisté.
+        final hasSession = api?.accessToken != null;
+        if (!hasSession && persisted != null) {
+          unawaited(session.clearProducerUser());
+        }
+        Get.offAllNamed(
+          hasSession ? Routes.producerHome : Routes.authIntent,
+          arguments: hasSession
+              ? (persisted ??
+                  const AuthUser(
+                    id: 'local-producer',
+                    email: '',
+                    name: 'Producteur',
+                    role: 'producteur',
+                  ))
+              : AppRole.producer,
+        );
+        return;
+      }
+      if (session.activated.value) {
+        // PIN illisible → reconnexion (échec fermé, pas 1234).
+        if (session.pinMissing.value) {
+          Get.offAllNamed(Routes.phone, arguments: {'reconnect': true});
+          return;
+        }
+        if (session.locked) {
+          Get.offAllNamed(Routes.blocked);
+          return;
+        }
+        Get.offAllNamed(Routes.unlock);
+        return;
+      }
+      if (role == AppRole.technician) {
+        Get.offAllNamed(Routes.authIntent, arguments: AppRole.technician);
+        return;
+      }
+      Get.offAllNamed(Routes.roleGate);
+    });
   }
 }
 
@@ -105,7 +150,7 @@ class SplashView extends GetView<SplashController> {
                 child: Column(children: [
                   const _LoadingBar(),
                   const SizedBox(height: 14),
-                  Text('TECHNICIEN · v0.1.0',
+                  Text('MBAY DIAAY · v0.1.0',
                       style: mono(10,
                           weight: FontWeight.w700, color: AppColors.lime)),
                 ]),

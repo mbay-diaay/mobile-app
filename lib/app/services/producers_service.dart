@@ -3,7 +3,7 @@ import 'package:get/get.dart';
 import 'api_client.dart';
 import 'network_service.dart';
 
-/// Appels API producteurs (le serveur a le dernier mot sur validation / droits).
+/// Appels API producteurs alignés OpenAPI prod.
 class ProducersService extends GetxService {
   ProducersService({ApiClient? client})
       : _client = client ?? Get.find<ApiClient>();
@@ -17,7 +17,7 @@ class ProducersService extends GetxService {
     return online && _client.accessToken != null;
   }
 
-  /// Crée un producteur sur le serveur. Renvoie le JSON safe, ou null si hors ligne / erreur.
+  /// Crée un producteur. **Absent** de OpenAPI prod → `NOT_FOUND` attendu.
   Future<Map<String, dynamic>?> create({
     required String firstName,
     required String lastName,
@@ -26,7 +26,9 @@ class ProducersService extends GetxService {
     String? cni,
     String status = 'recensé',
   }) async {
-    if (!canReachServer) return null;
+    if (!canReachServer) {
+      throw const ApiException('NETWORK', 'Réseau indisponible');
+    }
     final body = <String, dynamic>{
       'firstName': firstName,
       'lastName': lastName,
@@ -35,14 +37,50 @@ class ProducersService extends GetxService {
       if (phone != null && phone.isNotEmpty) 'phone': _normalizePhone(phone),
       if (cni != null && cni.trim().isNotEmpty) 'cni': cni.trim(),
     };
-    // Les erreurs (ApiException) remontent à l'écran, qui les affiche et propose de réessayer.
     final data = await _client.post('/producers', body: body);
     return data is Map<String, dynamic> ? data : null;
   }
 
-  /// Envoie une face de la CNI (multipart, champ « file »). Lève une [ApiException] en cas d'échec.
+  /// `PATCH /producers/{id}` — `UpdateProducerDto`.
+  Future<void> update(
+    String producerId, {
+    String? firstName,
+    String? lastName,
+    String? village,
+    String? phone,
+    String? sex,
+    int? age,
+    String? status,
+  }) async {
+    await _client.patch('/producers/$producerId', body: {
+      if (firstName != null) 'firstName': firstName,
+      if (lastName != null) 'lastName': lastName,
+      if (village != null) 'village': village,
+      if (phone != null && phone.isNotEmpty) 'phone': _normalizePhone(phone),
+      if (sex != null) 'sex': sex,
+      if (age != null) 'age': age,
+      if (status != null) 'status': status,
+    });
+  }
+
+  /// `POST /producers/{id}/corrections`.
+  Future<void> submitCorrection(
+    String producerId, {
+    required List<Map<String, String>> changes,
+    required String motif,
+  }) =>
+      _client.post('/producers/$producerId/corrections', body: {
+        'changes': changes,
+        'motif': motif,
+      });
+
+  /// Photo producteur : `PUT /producers/{id}/photo` (multipart).
+  Future<void> uploadPhoto(String producerId, String filePath) =>
+      _client.putFile('/producers/$producerId/photo', filePath);
+
+  /// Ancien chemin CNI — redirige vers la photo producteur (contrat prod).
   Future<void> uploadCniPhoto(String producerId, String filePath) =>
-      _client.postFile('/producers/$producerId/cni/photo', filePath);
+      uploadPhoto(producerId, filePath);
 
   static String _normalizePhone(String raw) {
     final digits = raw.replaceAll(RegExp(r'\D'), '');

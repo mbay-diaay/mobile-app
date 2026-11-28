@@ -3,11 +3,14 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
+import 'secure_storage.dart';
 import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
 
 import 'api_config.dart';
 import 'device_service.dart';
+import 'network_service.dart';
 import "package:flutter/foundation.dart";
 
 /// Erreur renvoyée par l'API (`{ code, message, details? }`) ou par le réseau (`NETWORK`).
@@ -24,7 +27,7 @@ class ApiException implements Exception {
   /// Message affichable à l'utilisateur, en français.
   String get userMessage => switch (code) {
         'NETWORK' => 'Pas de connexion. Vérifiez votre réseau et réessayez.',
-        'INVALID_CREDENTIALS' => 'E-mail ou mot de passe incorrect.',
+        'INVALID_CREDENTIALS' => 'Identifiants incorrects.',
         'OTP_INVALID' => 'Code incorrect. Vérifiez et réessayez.',
         'OTP_EXPIRED' => 'Ce code a expiré. Demandez-en un nouveau.',
         'OTP_ATTEMPTS' => 'Trop de tentatives. Demandez un nouveau code.',
@@ -41,6 +44,9 @@ class ApiException implements Exception {
         'UNAUTHORIZED' =>
           'Session expirée. Reconnectez-vous.',
         'FORBIDDEN' => "Vous n'avez pas accès à cette information.",
+        'NOT_FOUND' => message.isEmpty
+            ? 'Cette fonction n’est pas encore disponible sur le serveur.'
+            : message,
         'BAD_REQUEST' => message.isEmpty
             ? 'Vérifiez les informations saisies.'
             : 'Vérifiez les informations saisies : $message',
@@ -56,7 +62,7 @@ class ApiException implements Exception {
 class ApiClient extends GetxService {
   ApiClient({String? baseUrl, FlutterSecureStorage? storage})
       : _baseUrl = baseUrl ?? ApiConfig.baseUrl,
-        _storage = storage ?? const FlutterSecureStorage();
+        _storage = storage ?? appSecureStorage;
 
   static const _kAccess = 'access_token';
   static const _kRefresh = 'refresh_token';
@@ -74,10 +80,17 @@ class ApiClient extends GetxService {
   /// Appelé quand la session ne peut plus être renouvelée (jeton refusé).
   void Function()? onSessionExpired;
 
+  /// Préfixe des jetons de session producteur locale (sans API).
+  static const localTokenPrefix = 'local:';
+
   String get baseUrl => _baseUrl;
   String? get accessToken => _accessToken;
   String? get refreshToken => _refreshToken;
-  bool get hasSession => _refreshToken != null;
+  bool get hasSession => _accessToken != null || _refreshToken != null;
+
+  /// Session producteur hors API (`LocalProducerAuth`).
+  bool get isLocalSession =>
+      _accessToken != null && _accessToken!.startsWith(localTokenPrefix);
 
   /// Identifiant d'installation de cet appareil, envoyé dans l'en-tête `X-Device-Id`.
   String? get installationId => _installationId;
@@ -145,8 +158,20 @@ class ApiClient extends GetxService {
     Map<String, dynamic>? query,
     bool auth = true,
   }) async {
+    // Session locale producteur : ne pas frapper l’API avec un jeton `local:`.
+    if (auth && isLocalSession) {
+      throw const ApiException(
+        'NETWORK',
+        'Session locale — synchronisation serveur indisponible',
+      );
+    }
     var res = await _send(method, path, body: body, query: query);
-    if (res.statusCode == 401 && auth && _refreshToken != null) {
+    if (res.statusCode == 401 && auth) {
+      if (_refreshToken == null) {
+        await clearTokens();
+        onSessionExpired?.call();
+        return _decodeOrThrow(res);
+      }
       // Appareil révoqué ou déconnecté par un administrateur : inutile de renouveler la session.
       final refusal = _deviceRefusalIn(res);
       if (refusal != null) return _endSessionOnRefusal(refusal, res);
@@ -173,11 +198,27 @@ class ApiClient extends GetxService {
   Future<dynamic> patch(String path, {Object? body}) =>
       request('PATCH', path, body: body);
 
-  /// Envoi d'un fichier (multipart). Même renouvellement de session que [request].
+  Future<dynamic> put(String path, {Object? body}) =>
+      request('PUT', path, body: body);
+
+  /// Envoi d'un fichier (multipart POST). Même renouvellement de session que [request].
   Future<dynamic> postFile(String path, String filePath,
+          {String field = 'file'}) =>
+      _multipart('POST', path, filePath, field: field);
+
+  /// Envoi d'un fichier (multipart PUT) — ex. `PUT /producers/{id}/photo`.
+  Future<dynamic> putFile(String path, String filePath,
+          {String field = 'file'}) =>
+      _multipart('PUT', path, filePath, field: field);
+
+  Future<dynamic> _multipart(String method, String path, String filePath,
       {String field = 'file'}) async {
+    if (Get.isRegistered<NetworkService>() &&
+        !Get.find<NetworkService>().online.value) {
+      throw const ApiException('NETWORK', 'Réseau indisponible');
+    }
     Future<http.Response> once() async {
-      final req = http.MultipartRequest('POST', _uri(path))
+      final req = http.MultipartRequest(method, _uri(path))
         ..headers['Accept'] = 'application/json'
         ..files.add(await http.MultipartFile.fromPath(field, filePath));
       if (_accessToken != null) {
@@ -207,6 +248,11 @@ class ApiClient extends GetxService {
 
   Future<http.Response> _send(String method, String path,
       {Object? body, Map<String, dynamic>? query}) async {
+    // Simulation hors ligne (Profil › Réseau) : aucune requête réseau.
+    if (Get.isRegistered<NetworkService>() &&
+        !Get.find<NetworkService>().online.value) {
+      throw const ApiException('NETWORK', 'Réseau indisponible');
+    }
     final req = http.Request(method, _uri(path, query))
       ..headers.addAll(_headers);
     if (body != null) req.body = jsonEncode(body);
@@ -217,7 +263,18 @@ class ApiClient extends GetxService {
       throw const ApiException('NETWORK', 'Délai dépassé');
     } on SocketException {
       throw const ApiException('NETWORK', 'Réseau indisponible');
-    } on http.ClientException {
+    } on http.ClientException catch (e) {
+      final m = e.message;
+      // macOS / certains clients : « Cannot POST /v1/… » quand la route n’existe pas.
+      final lower = m.toLowerCase();
+      if (lower.contains('cannot post') ||
+          lower.contains('cannot get') ||
+          lower.contains('cannot put') ||
+          lower.contains('cannot patch') ||
+          lower.contains('cannot delete') ||
+          m.contains('/auth/producer')) {
+        throw ApiException('NOT_FOUND', m, status: 404);
+      }
       throw const ApiException('NETWORK', 'Réseau indisponible');
     }
   }
@@ -227,30 +284,43 @@ class ApiClient extends GetxService {
         _refreshing = null;
       });
 
+  /// Renouvellement session — aligné doc authentification-mobile :
+  /// seul un 401/403 (ou jeton invalide) déconnecte ; 429 / 5xx / réseau
+  /// conservent les jetons (mode hors ligne / réessai).
   Future<bool> _doRefresh() async {
+    if (isLocalSession) return true;
     try {
       final res = await _send('POST', '/auth/refresh',
           body: {'refreshToken': _refreshToken});
-      // Seul un refus explicite (401/403) perd la session : un 429 ou une panne serveur (5xx)
-      // garde les jetons, la requête échouera et pourra être rejouée plus tard.
       if (res.statusCode == 401 || res.statusCode == 403) {
         _deviceRefusal = _deviceRefusalIn(res);
         return false;
       }
+      // 429 / 5xx : garder la session (ne pas clearTokens).
       if (res.statusCode != 200 && res.statusCode != 201) return true;
       final data = jsonDecode(res.body);
+      if (data is! Map) return false;
       final access = data['accessToken'] as String?;
       if (access == null) return false;
       await setTokens(
           accessToken: access,
           refreshToken: data['refreshToken'] as String? ?? _refreshToken);
       return true;
-    } on ApiException {
-      // Réseau coupé : on garde la session, la requête échouera avec NETWORK.
+    } on ApiException catch (e) {
+      // Réseau coupé : on garde la session.
+      if (e.isNetwork) return true;
+      // Autre erreur métier inattendue sur refresh : ne pas jeter la session
+      // sauf codes d’auth explicites.
+      if (e.code == 'REFRESH_INVALID' ||
+          e.code == 'UNAUTHORIZED' ||
+          e.code == 'UNAUTHENTICATED') {
+        return false;
+      }
       return true;
     } catch (e) {
-      debugPrint("[ERROR][ApiClient._doRefresh] $e");
-      return false;
+      debugPrint('[ERROR][ApiClient._doRefresh] $e');
+      // Erreur inconnue : préférer garder la session (réessai possible).
+      return true;
     }
   }
 
@@ -287,9 +357,18 @@ class ApiClient extends GetxService {
     }
     if (res.statusCode >= 200 && res.statusCode < 300) return data;
     if (data is Map && data['code'] is String) {
-      throw ApiException(
-          data['code'] as String, (data['message'] ?? '').toString(),
-          status: res.statusCode, details: data['details']);
+      // Préférer le code métier dans `details` (ex. INVALID_CREDENTIALS sous
+      // un UNAUTHORIZED 401) pour afficher le bon message à l'utilisateur.
+      final details = data['details'];
+      final nested = details is Map ? details['code'] : null;
+      final code = (nested is String && nested.isNotEmpty)
+          ? nested
+          : data['code'] as String;
+      final message = (details is Map && details['message'] != null)
+          ? details['message'].toString()
+          : (data['message'] ?? '').toString();
+      throw ApiException(code, message,
+          status: res.statusCode, details: details);
     }
     throw ApiException('HTTP_${res.statusCode}', '', status: res.statusCode);
   }

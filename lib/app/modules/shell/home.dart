@@ -85,7 +85,7 @@ class _HomeOffline extends StatelessWidget {
               child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Bonjour',
+                    Text('home.hello'.tr,
                         style: jakarta(11, color: AppColors.white(.6))),
                     Text(s.technician,
                         style: jakarta(16,
@@ -95,12 +95,23 @@ class _HomeOffline extends StatelessWidget {
                   ]),
             ),
             Chip2(
-              label: 'Hors ligne',
+              label: 'home.offline'.tr,
               bg: AppColors.white(.1),
               fg: Colors.white,
               dot: const PulseDot(color: AppColors.orange, size: 7),
               padding: const EdgeInsets.fromLTRB(4, 3, 10, 3),
-              onTap: Get.find<NetworkService>().toggle,
+              onTap: () {
+                final net = Get.find<NetworkService>();
+                net.toggle();
+                showToast(
+                  net.online.value
+                      ? 'offline.toastOn'.tr
+                      : 'offline.toastOff'.tr,
+                  icon: net.online.value
+                      ? Symbols.wifi_rounded
+                      : Symbols.wifi_off_rounded,
+                );
+              },
             ),
           ]),
           const SizedBox(height: 16),
@@ -137,12 +148,12 @@ class _HomeOffline extends StatelessWidget {
                           child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('éléments à corriger',
+                                Text('home.fix'.tr,
                                     style: jakarta(16,
                                         weight: FontWeight.w800,
                                         color: AppColors.maroon)),
                                 const SizedBox(height: 2),
-                                Text('Touchez pour voir et corriger.',
+                                Text('home.fixHint'.tr,
                                     style:
                                         jakarta(12.5, color: AppColors.maroon)),
                               ]),
@@ -167,9 +178,9 @@ class _HomeOffline extends StatelessWidget {
                 child: FadeSlideIn(
                   delay: Motion.stagger(0, base: 200),
                   offset: const Offset(-30, 30),
-                  child: const _BigTile(
+                  child: _BigTile(
                     icon: Symbols.person_add_rounded,
-                    title: 'Nouveau producteur',
+                    title: 'home.newProducer'.tr,
                     height: 172,
                     variant: _TileVariant.lime,
                     route: Routes.newProducer,
@@ -181,9 +192,9 @@ class _HomeOffline extends StatelessWidget {
                 child: FadeSlideIn(
                   delay: Motion.stagger(1, base: 200),
                   offset: const Offset(30, 30),
-                  child: const _BigTile(
+                  child: _BigTile(
                     icon: Symbols.location_on_rounded,
-                    title: 'Relever une parcelle',
+                    title: 'home.survey'.tr,
                     height: 172,
                     variant: _TileVariant.forest,
                     route: Routes.survey,
@@ -200,7 +211,7 @@ class _HomeOffline extends StatelessWidget {
                     icon: Symbols.checklist_rounded,
                     bg: AppColors.amberIconBg,
                     fg: AppColors.amberIcon,
-                    title: 'À faire',
+                    title: 'home.todo'.tr,
                     sub: '${s.todoCount.value} fiches',
                     onTap: () => _goTab(3),
                   ),
@@ -214,24 +225,54 @@ class _HomeOffline extends StatelessWidget {
                     icon: Symbols.search_rounded,
                     bg: AppColors.sage,
                     fg: AppColors.forest,
-                    title: 'Chercher',
-                    sub: 'un producteur',
+                    title: 'home.search'.tr,
+                    sub: 'shell.producers'.tr,
                     onTap: () => _goTab(1),
+                  ),
+                ),
+              ),
+            ]),
+            const SizedBox(height: 10),
+            Row(children: [
+              Expanded(
+                child: FadeSlideIn(
+                  delay: Motion.stagger(4, base: 200),
+                  child: _SmallCard(
+                    icon: Symbols.shopping_bag_rounded,
+                    bg: AppColors.lime,
+                    fg: AppColors.forest,
+                    title: 'home.sale'.tr,
+                    sub: 'home.quick'.tr,
+                    onTap: () => Get.toNamed(Routes.quickSale),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: FadeSlideIn(
+                  delay: Motion.stagger(5, base: 200),
+                  child: _SmallCard(
+                    icon: Symbols.payments_rounded,
+                    bg: AppColors.blueSoft,
+                    fg: AppColors.blueInk,
+                    title: 'home.charge'.tr,
+                    sub: 'home.quick'.tr,
+                    onTap: () => Get.toNamed(Routes.quickExpense),
                   ),
                 ),
               ),
             ]),
             const SizedBox(height: 14),
             FadeSlideIn(
-              delay: Motion.stagger(4, base: 200),
+              delay: Motion.stagger(6, base: 200),
               child: Row(children: [
                 Expanded(
-                    child: Text('Vus récemment',
+                    child: Text('home.recent'.tr,
                         style: jakarta(16,
                             weight: FontWeight.w800, tracking: -.01))),
                 GestureDetector(
                   onTap: () => _goTab(1),
-                  child: Text('Tout voir',
+                  child: Text('home.seeAll'.tr,
                       style: jakarta(12,
                           weight: FontWeight.w700, color: AppColors.forest)),
                 ),
@@ -281,7 +322,7 @@ class _HomeOnline extends StatelessWidget {
               child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Bonjour ${s.technician}',
+                    Text('${'home.hello'.tr} ${s.technician}',
                         style: jakarta(16,
                             weight: FontWeight.w800,
                             color: Colors.white,
@@ -291,7 +332,18 @@ class _HomeOnline extends StatelessWidget {
                   ]),
             ),
             GestureDetector(
-              onTap: Get.find<NetworkService>().toggle,
+              onTap: () {
+                final net = Get.find<NetworkService>();
+                net.toggle();
+                showToast(
+                  net.online.value
+                      ? 'offline.toastOn'.tr
+                      : 'offline.toastOff'.tr,
+                  icon: net.online.value
+                      ? Symbols.wifi_rounded
+                      : Symbols.wifi_off_rounded,
+                );
+              },
               child: const PulseDot(color: AppColors.green, size: 8),
             ),
           ]),
@@ -338,25 +390,25 @@ class _HomeOnline extends StatelessWidget {
                 mainAxisExtent: 160,
               ),
               children: [
-                for (final (i, t) in const [
+                for (final (i, t) in [
                   _BigTile(
                       icon: Symbols.groups_rounded,
-                      title: 'Liste des producteurs',
+                      title: 'home.producersList'.tr,
                       variant: _TileVariant.lime,
                       tab: 1),
                   _BigTile(
                       icon: Symbols.location_on_rounded,
-                      title: 'Relever une parcelle',
+                      title: 'home.survey'.tr,
                       variant: _TileVariant.forest,
                       route: Routes.survey),
                   _BigTile(
                       icon: Symbols.person_add_rounded,
-                      title: 'Nouveau producteur',
+                      title: 'home.newProducer'.tr,
                       variant: _TileVariant.white,
                       route: Routes.newProducer),
                   _BigTile(
                       icon: Symbols.checklist_rounded,
-                      title: 'Liste des tâches à effectuer',
+                      title: 'home.todoList'.tr,
                       variant: _TileVariant.amber,
                       tab: 3,
                       badge: true),
@@ -366,6 +418,39 @@ class _HomeOnline extends StatelessWidget {
                       scale: .85,
                       child: t),
               ],
+            ),
+            const SizedBox(height: 14),
+            FadeSlideIn(
+              delay: const Duration(milliseconds: 500),
+              child: Text('home.quick'.tr,
+                  style: jakarta(16, weight: FontWeight.w800, tracking: -.01)),
+            ),
+            const SizedBox(height: 10),
+            FadeSlideIn(
+              delay: const Duration(milliseconds: 520),
+              child: Row(children: [
+                Expanded(
+                  child: _SmallCard(
+                    icon: Symbols.shopping_bag_rounded,
+                    bg: AppColors.lime,
+                    fg: AppColors.forest,
+                    title: 'home.sale'.tr,
+                    sub: '3 infos',
+                    onTap: () => Get.toNamed(Routes.quickSale),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _SmallCard(
+                    icon: Symbols.payments_rounded,
+                    bg: AppColors.amberIconBg,
+                    fg: AppColors.amberIcon,
+                    title: 'home.charge'.tr,
+                    sub: '3 infos',
+                    onTap: () => Get.toNamed(Routes.quickExpense),
+                  ),
+                ),
+              ]),
             ),
             const SizedBox(height: 14),
             Obx(() => s.pending.isEmpty
@@ -400,7 +485,7 @@ class _HomeOnline extends StatelessWidget {
                                           weight: FontWeight.w800,
                                           color: AppColors.amberInk)),
                                   const SizedBox(height: 2),
-                                  Text('Envoi automatique en cours de route.',
+                                  Text('home.autoSend'.tr,
                                       style: jakarta(12.5,
                                           color: AppColors.amberInk)),
                                 ]),
@@ -458,7 +543,7 @@ class _History extends StatelessWidget {
         FadeSlideIn(
           delay: const Duration(milliseconds: 600),
           child: Row(children: [
-            Text('Producteurs enregistrés',
+            Text('home.registered'.tr,
                 style: jakarta(16, weight: FontWeight.w800, tracking: -.01)),
             const SizedBox(width: 8),
             Chip2(
@@ -471,7 +556,7 @@ class _History extends StatelessWidget {
             const Spacer(),
             GestureDetector(
               onTap: () => _goTab(1),
-              child: Text('Tout voir',
+              child: Text('home.seeAll'.tr,
                   style: jakarta(13,
                       weight: FontWeight.w700, color: AppColors.forest)),
             ),
@@ -646,9 +731,6 @@ class _BigTile extends StatelessWidget {
                     color: fg,
                     tracking: -.02,
                     height: 1.1)),
-            const SizedBox(height: 3),
-            Text('Wolof · à traduire',
-                style: jakarta(11, style: FontStyle.italic, color: sub)),
           ]),
           if (badge)
             Positioned(

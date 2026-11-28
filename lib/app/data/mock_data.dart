@@ -138,6 +138,32 @@ class Plot {
   Plot withRemoteId(String id) =>
       Plot(code, area, crops, status, statusBg, statusInk,
           remoteId: id, areaHa: areaHa, lat: lat, lng: lng, label: label);
+
+  Plot copyWith({
+    String? area,
+    String? crops,
+    String? status,
+    Color? statusBg,
+    Color? statusInk,
+    String? remoteId,
+    double? areaHa,
+    double? lat,
+    double? lng,
+    String? label,
+  }) =>
+      Plot(
+        code,
+        area ?? this.area,
+        crops ?? this.crops,
+        status ?? this.status,
+        statusBg ?? this.statusBg,
+        statusInk ?? this.statusInk,
+        remoteId: remoteId ?? this.remoteId,
+        areaHa: areaHa ?? this.areaHa,
+        lat: lat ?? this.lat,
+        lng: lng ?? this.lng,
+        label: label ?? this.label,
+      );
 }
 
 class Crop {

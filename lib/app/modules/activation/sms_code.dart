@@ -80,8 +80,20 @@ class SmsCodeController extends GetxController {
       final auth = Get.find<AuthService>();
       await auth.verifyOtp(challengeId: challenge.id, code: code.value);
       final me = await auth.me();
+      // OTP e-mail = parcours technicien (ou compte test admin) — pas producteur.
+      if (me.role == AuthUser.producerRole) {
+        await auth.logout();
+        error.value =
+            'Ce parcours est réservé aux techniciens. Choisissez « Producteur » au démarrage.';
+        shake.value++;
+        return;
+      }
       final session = Get.find<SessionService>();
-      session.signIn(TestAccount.fromUser(me, scoop: me.scoopName ?? ''));
+      await session.setAppRole(AppRole.technician);
+      session.signIn(
+        TestAccount.fromUser(me, scoop: me.scoopName ?? ''),
+        permissions: me.permissions,
+      );
       Get.toNamed(Routes.pinCreate);
     } on ApiException catch (e) {
       debugPrint("[ERROR][SmsCode.validate] ${e}");

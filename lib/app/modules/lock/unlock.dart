@@ -12,7 +12,7 @@ import '../../widgets/buttons.dart';
 import '../../widgets/layout.dart';
 import '../../widgets/pin_widgets.dart';
 
-/// 05 · Déverrouillage par PIN (prototype : 1234). Trois erreurs → écran 06.
+/// 05 · Déverrouillage par PIN (celui choisi à l’activation). Trois erreurs → écran 06.
 class UnlockController extends GetxController {
   final session = Get.find<SessionService>();
   final entry = ''.obs;
@@ -126,7 +126,7 @@ class UnlockView extends GetView<UnlockController> {
                           child: Text(
                             controller.error.value
                                 ? 'Code incorrect · ${controller.remaining} essai${controller.remaining > 1 ? 's' : ''} restant${controller.remaining > 1 ? 's' : ''}'
-                                : 'Tapez votre code PIN · prototype : ${session.pin.value}',
+                                : 'Tapez votre code PIN',
                             key: ValueKey(controller.error.value),
                             style: jakarta(12,
                                 color: controller.error.value

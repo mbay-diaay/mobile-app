@@ -57,14 +57,25 @@ class PhoneController extends GetxController {
   final error = RxnString();
   final shake = 0.obs;
 
+  /// Mode imposé par l’écran « nouveau / déjà inscrit » (pas de bascule UI).
+  bool modeLocked = false;
+
   @override
   void onInit() {
     super.onInit();
     final args = Get.arguments;
-    if (args is Map && args['reconnect'] == true) {
-      reconnect = true;
-      mode.value = LoginMode.password;
-      error.value = 'Votre session a expiré. Reconnectez-vous.';
+    if (args is Map) {
+      if (args['reconnect'] == true) {
+        reconnect = true;
+        mode.value = LoginMode.password;
+        modeLocked = true;
+        error.value = 'Votre session a expiré. Reconnectez-vous.';
+      }
+      final m = args['mode'];
+      if (m is LoginMode) {
+        mode.value = m;
+        modeLocked = true;
+      }
     }
   }
 
@@ -86,6 +97,8 @@ class PhoneController extends GetxController {
   void setMode(LoginMode next) {
     if (mode.value == next) return;
     mode.value = next;
+    // Changer de mode = nouvelle tentative, plus un état « reconnexion ».
+    reconnect = false;
     error.value = null;
     revision.value++;
   }
@@ -106,8 +119,50 @@ class PhoneController extends GetxController {
     shake.value++;
   }
 
+  /// Accès seed local (sans API) pour explorer l’app tant que la prod refuse les comptes démo.
+  Future<void> enterLocalSeed() async {
+    _unfocusAll();
+    final session = Get.find<SessionService>();
+    await session.setAppRole(AppRole.technician);
+    session.signIn(
+      const TestAccount(
+        'fatou.sarr@cradesc.example',
+        'Fatou',
+        'Fatou Sarr',
+        'FS',
+        'SCOOP Démo Niayes',
+      ),
+      permissions: const [
+        'producer.read',
+        'producer.edit',
+        'dashboard.read',
+      ],
+    );
+    session.pin.value = SessionService.defaultPin;
+    session.loadDemoCatalog();
+    await session.completeActivation();
+    Get.offAllNamed(Routes.shell);
+  }
+
   Future<void> submit() async {
-    if (!valid) return;
+    if (!valid) {
+      revision.value;
+      if (mode.value == LoginMode.first) {
+        if (!_phoneRe.hasMatch(phone.text.trim())) {
+          _fail('Indiquez un numéro de téléphone valide.');
+        } else if (!_codeRe.hasMatch(code.text)) {
+          _fail('Le code d’activation doit contenir 5 chiffres.');
+        } else if (!_isStrongPassword(password.text)) {
+          _fail(
+              'Mot de passe : 8 caractères min., au moins une lettre et un chiffre (ex. Darlyn355).');
+        } else if (confirm.text != password.text) {
+          _fail('Les deux mots de passe ne correspondent pas.');
+        }
+      } else {
+        _fail('Complétez le téléphone et le mot de passe.');
+      }
+      return;
+    }
     _unfocusAll();
     final auth = Get.find<AuthService>();
     try {
@@ -134,10 +189,11 @@ class PhoneController extends GetxController {
     final me = await auth.me();
     if (me.role != AuthUser.technicianRole) {
       await Get.find<ApiClient>().clearTokens();
-      _fail('Cette application est réservée aux techniciens.');
+      _fail('Ce parcours est réservé aux techniciens. Choisissez « Producteur » au démarrage.');
       return;
     }
     final session = Get.find<SessionService>();
+    await session.setAppRole(AppRole.technician);
     if (reconnect) {
       if (session.activated.value && me.email == session.account.value.email) {
         await session.refreshMe();
@@ -146,7 +202,7 @@ class PhoneController extends GetxController {
       }
       // Autre technicien : on ferme sa session et on vide le téléphone avant tout nouvel accès.
       await auth.logout();
-      session.revoke();
+      await session.revoke();
       reconnect = false;
       password.clear();
       revision.value++;
@@ -189,8 +245,9 @@ class PhoneView extends GetView<PhoneController> {
 
   String _hint(LoginMode mode) => switch (mode) {
         LoginMode.first =>
-          'Le code à 5 chiffres vous est remis par votre gestionnaire. Il ne sert qu\'une fois.',
-        LoginMode.password => 'Utilisez le mot de passe choisi à votre première connexion.',
+          'Code gestionnaire (une fois). Mot de passe : 8 car. min., une lettre et un chiffre.',
+        LoginMode.password =>
+          'Utilisez le mot de passe choisi à votre première connexion.',
         LoginMode.email => 'Un code de vérification arrive par e-mail.',
       };
 
@@ -208,10 +265,27 @@ class PhoneView extends GetView<PhoneController> {
               child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const FadeSlideIn(
+                    FadeSlideIn(
                       child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [StepLabel(1), StepIndicator(step: 1)]),
+                          children: [
+                            if (controller.modeLocked && !controller.reconnect)
+                              TextButton.icon(
+                                onPressed: () => Get.back(),
+                                style: TextButton.styleFrom(
+                                  foregroundColor: AppColors.white(.8),
+                                  padding: EdgeInsets.zero,
+                                ),
+                                icon: const Icon(Symbols.arrow_back_rounded,
+                                    size: 18),
+                                label: Text('common.back'.tr,
+                                    style: jakarta(13,
+                                        weight: FontWeight.w700)),
+                              )
+                            else
+                              const StepLabel(1),
+                            const StepIndicator(step: 1),
+                          ]),
                     ),
                     const SizedBox(height: 20),
                     FadeSlideIn(
@@ -235,13 +309,6 @@ class PhoneView extends GetView<PhoneController> {
                           style: display(30, color: Colors.white))),
                     ),
                     const SizedBox(height: 8),
-                    FadeSlideIn(
-                      delay: const Duration(milliseconds: 240),
-                      child: Text('Wolof · traduction à venir',
-                          style: jakarta(12,
-                              style: FontStyle.italic,
-                              color: AppColors.white(.6))),
-                    ),
                   ]),
             ),
           ),
@@ -253,7 +320,9 @@ class PhoneView extends GetView<PhoneController> {
                   return Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        if (!controller.reconnect && mode != LoginMode.email) ...[
+                        if (!controller.modeLocked &&
+                            !controller.reconnect &&
+                            mode != LoginMode.email) ...[
                           _ModeSwitch(controller: controller),
                           const SizedBox(height: 18),
                         ],
@@ -353,35 +422,23 @@ class PhoneView extends GetView<PhoneController> {
                             message: controller.error.value,
                             hint: _hint(mode)),
                         const Spacer(),
-                        if (!controller.reconnect)
-                          Center(
-                            child: TextButton(
-                              onPressed: () => controller.setMode(
-                                  mode == LoginMode.email
-                                      ? LoginMode.password
-                                      : LoginMode.email),
-                              child: Text(
-                                  mode == LoginMode.email
-                                      ? 'Connexion par téléphone'
-                                      : 'Compte e-mail (test)',
-                                  style: jakarta(12,
-                                      weight: FontWeight.w600,
-                                      color: AppColors.muted)),
-                            ),
-                          ),
                         const SizedBox(height: 8),
                         FadeSlideIn(
                           delay: const Duration(milliseconds: 600),
                           child: SwipeCta(
                             label: switch (mode) {
                               LoginMode.first => 'Glissez pour activer',
-                              LoginMode.password => 'Glissez pour vous connecter',
-                              LoginMode.email => 'Glissez pour recevoir le code',
+                              LoginMode.password =>
+                                'Glissez pour vous connecter',
+                              LoginMode.email =>
+                                'Glissez pour recevoir le code',
                             },
                             busyLabel: mode == LoginMode.email
                                 ? 'Envoi du code…'
                                 : 'Connexion…',
-                            onConfirm: controller.valid ? controller.submit : null,
+                            // Toujours actif : si le formulaire est invalide,
+                            // [submit] affiche la raison (ex. MDP sans lettre).
+                            onConfirm: controller.submit,
                           ),
                         ),
                       ]);
