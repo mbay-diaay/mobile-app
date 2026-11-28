@@ -64,9 +64,14 @@ class ProducerRegisterController extends GetxController {
       if (!api.isLocalSession) {
         try {
           me = await auth.me();
-        } catch (_) {}
+        } on ApiException {
+          await auth.logout();
+          error.value = 'Impossible de vérifier le compte. Réessayez.';
+          shake.value++;
+          return;
+        }
       }
-      if (me.role.isNotEmpty && me.role != AuthUser.producerRole) {
+      if (me.role != AuthUser.producerRole) {
         await auth.logout();
         error.value = 'Ce compte n’est pas un compte producteur.';
         shake.value++;

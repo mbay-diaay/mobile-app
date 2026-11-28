@@ -5,7 +5,7 @@ Document de reprise + **brief CTO** (copiable dans Notion).
 
 **Périmètre agent mobile** : `mbay-diaay-mobile` uniquement. Web Angular = Aldrich (ne pas toucher).
 
-**Session 25/11 (soir)** : écran **nouveau / déjà inscrit** (`auth_intent`) ; PIN sans hint 1234 ; download API réel ; APK debug `dist/mbay-diaay-tech-debug.apk`. Front : PR #14 `fix/techniciens-sync-statut`. **Goulots mobile traités** : auth producteur locale (fallback Keychain si `/auth/producer/*` absent), cold start producteur (`producerUser` persisté), `LocalProducers` Drift + réconciliation outbox, `connectivity_plus` (réseau réel + simulation Profil). Voir `docs/INTEGRATION_API.md`.
+**Session 28/11** : lots revue sécurité + offline — seeds/API dialog derrière `kDebugMode` ; catalogue producteur = seed seulement + empty states ; PIN persisté (`failedAttempts` / `lockedUntil`) + échec fermé ; `allowBackup=false` ; flush outbox auto + CNI persistées ; `markSent` honnête ; CI GitHub Actions. Voir `docs/INTEGRATION_API.md`.
 
 ---
 

@@ -39,6 +39,7 @@ class FloatingNavBar extends StatelessWidget {
     Symbols.home_rounded,
     Symbols.pentagon_rounded,
     Symbols.calendar_month_rounded,
+    Symbols.notifications_rounded,
     Symbols.person_rounded,
   ];
 

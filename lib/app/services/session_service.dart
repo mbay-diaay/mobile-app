@@ -62,6 +62,12 @@ class SessionService extends GetxService {
   final pin = defaultPin.obs;
   final failedAttempts = 0.obs;
 
+  /// Epoch ms jusqu’à laquelle le PIN reste bloqué (persisté).
+  final lockedUntilMs = 0.obs;
+
+  /// True si le téléphone est activé mais le PIN est illisible (échec fermé).
+  final pinMissing = false.obs;
+
   /// Téléphone activé (étapes 01 à 04 terminées) : le démarrage mène au PIN.
   final activated = false.obs;
 
@@ -74,6 +80,8 @@ class SessionService extends GetxService {
   static const _kName = 'account_name';
   static const _kScoop = 'account_scoop';
   static const _kPin = 'pin';
+  static const _kFailedAttempts = 'pin_failed_attempts';
+  static const _kLockedUntil = 'pin_locked_until';
   static const _kProdId = 'producer_user_id';
   static const _kProdName = 'producer_user_name';
   static const _kProdEmail = 'producer_user_email';
@@ -89,6 +97,9 @@ class SessionService extends GetxService {
     _prefs = await SharedPreferences.getInstance();
     activated.value = _prefs.getBool(_kActivated) ?? false;
     appRole.value = _parseAppRole(_prefs.getString(_kAppRole));
+    failedAttempts.value = _prefs.getInt(_kFailedAttempts) ?? 0;
+    lockedUntilMs.value = _prefs.getInt(_kLockedUntil) ?? 0;
+    _expireLockIfNeeded();
     final email = _prefs.getString(_kEmail);
     if (email != null) {
       account.value = TestAccount.fromUser(
@@ -109,11 +120,46 @@ class SessionService extends GetxService {
         scoopName: _prefs.getString(_kProdScoop),
       );
     }
-    pin.value = await _loadPin();
+    final loaded = await _loadPin();
+    if (loaded == null) {
+      pinMissing.value = true;
+      pin.value = '';
+    } else {
+      pinMissing.value = false;
+      pin.value = loaded;
+    }
     ever(pin, (p) {
+      if (p.isEmpty) return;
       unawaited(_secure.write(key: _kPin, value: p));
     });
     return this;
+  }
+
+  void _expireLockIfNeeded() {
+    final until = lockedUntilMs.value;
+    if (until <= 0) return;
+    if (DateTime.now().millisecondsSinceEpoch >= until) {
+      lockedUntilMs.value = 0;
+      failedAttempts.value = 0;
+      unawaited(_prefs.remove(_kLockedUntil));
+      unawaited(_prefs.setInt(_kFailedAttempts, 0));
+    }
+  }
+
+  /// Secondes restantes avant nouvel essai PIN (0 = libre).
+  int get lockRemainingSeconds {
+    _expireLockIfNeeded();
+    final until = lockedUntilMs.value;
+    if (until <= 0) return 0;
+    final ms = until - DateTime.now().millisecondsSinceEpoch;
+    return ms <= 0 ? 0 : (ms / 1000).ceil();
+  }
+
+  Future<void> clearPinLock() async {
+    failedAttempts.value = 0;
+    lockedUntilMs.value = 0;
+    await _prefs.setInt(_kFailedAttempts, 0);
+    await _prefs.remove(_kLockedUntil);
   }
 
   /// Mémorise le producteur connecté (API ou vault local) pour le prochain boot.
@@ -138,7 +184,8 @@ class SessionService extends GetxService {
   }
 
   /// Migre un ancien PIN SharedPreferences vers le trousseau, puis le supprime.
-  Future<String> _loadPin() async {
+  /// Renvoie null si le téléphone est activé mais aucun PIN n’est lisible (échec fermé).
+  Future<String?> _loadPin() async {
     try {
       final secure = await _secure.read(key: _kPin);
       if (secure != null && secure.isNotEmpty) return secure;
@@ -155,6 +202,8 @@ class SessionService extends GetxService {
       await _prefs.remove(_kPin);
       return legacy;
     }
+    // Activé sans PIN lisible → ne pas retomber sur 1234.
+    if (activated.value) return null;
     return defaultPin;
   }
 
@@ -207,7 +256,7 @@ class SessionService extends GetxService {
       unawaited(Get.find<AppDatabase>().clearAll());
     }
     activated.value = false;
-    failedAttempts.value = 0;
+    pinMissing.value = false;
     pin.value = defaultPin;
     permissions.clear();
     usingDemoCatalog.value = false;
@@ -217,6 +266,7 @@ class SessionService extends GetxService {
     plots.clear();
     cropPlans.clear();
     todoCount.value = 0;
+    await clearPinLock();
     await _prefs.remove(_kActivated);
     await _prefs.remove(_kAppRole);
     appRole.value = null;
@@ -507,18 +557,29 @@ class SessionService extends GetxService {
   }
 
   bool checkPin(String value) {
+    _expireLockIfNeeded();
+    if (pinMissing.value || pin.value.isEmpty) return false;
+    if (lockRemainingSeconds > 0) return false;
     if (value == pin.value) {
-      failedAttempts.value = 0;
+      unawaited(clearPinLock());
       return true;
     }
     failedAttempts.value++;
+    unawaited(_prefs.setInt(_kFailedAttempts, failedAttempts.value));
+    if (failedAttempts.value >= maxAttempts) {
+      lockedUntilMs.value =
+          DateTime.now().add(const Duration(minutes: 3)).millisecondsSinceEpoch;
+      unawaited(_prefs.setInt(_kLockedUntil, lockedUntilMs.value));
+    }
     return false;
   }
 
   /// Vérifie le PIN sans compter d’échec (changement de PIN depuis le profil).
-  bool matchesPin(String value) => value == pin.value;
+  bool matchesPin(String value) =>
+      !pinMissing.value && pin.value.isNotEmpty && value == pin.value;
 
-  bool get locked => failedAttempts.value >= maxAttempts;
+  bool get locked =>
+      lockRemainingSeconds > 0 || failedAttempts.value >= maxAttempts;
 
   void visit(Producer p) {
     recent.removeWhere((x) => x.code == p.code);
@@ -1032,10 +1093,23 @@ class SessionService extends GetxService {
     pending.add(PendingItem(issue.icon, 'Correction · ${issue.owner}'));
   }
 
-  /// Vide la file UI seulement après un flush réussi (N > 0).
+  /// Retire au plus [flushed] éléments de la file UI (pas un clear aveugle).
   void markSent({int flushed = 0}) {
     if (flushed <= 0) return;
-    pending.clear();
+    final n = flushed.clamp(0, pending.length);
+    pending.removeRange(0, n);
+  }
+
+  /// True s’il reste des mutations Drift non envoyées.
+  Future<bool> hasPendingOutbox() async {
+    if (!Get.isRegistered<AppDatabase>()) return false;
+    try {
+      final rows = await Get.find<AppDatabase>().pendingOutbox();
+      return rows.isNotEmpty;
+    } catch (e) {
+      debugPrint('[ERROR][SessionService.hasPendingOutbox] $e');
+      return false;
+    }
   }
 
   /// Demande de correction (`POST /producers/{id}/corrections`).

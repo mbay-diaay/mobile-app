@@ -158,8 +158,20 @@ class ApiClient extends GetxService {
     Map<String, dynamic>? query,
     bool auth = true,
   }) async {
+    // Session locale producteur : ne pas frapper l’API avec un jeton `local:`.
+    if (auth && isLocalSession) {
+      throw const ApiException(
+        'NETWORK',
+        'Session locale — synchronisation serveur indisponible',
+      );
+    }
     var res = await _send(method, path, body: body, query: query);
-    if (res.statusCode == 401 && auth && _refreshToken != null) {
+    if (res.statusCode == 401 && auth) {
+      if (_refreshToken == null) {
+        await clearTokens();
+        onSessionExpired?.call();
+        return _decodeOrThrow(res);
+      }
       // Appareil révoqué ou déconnecté par un administrateur : inutile de renouveler la session.
       final refusal = _deviceRefusalIn(res);
       if (refusal != null) return _endSessionOnRefusal(refusal, res);

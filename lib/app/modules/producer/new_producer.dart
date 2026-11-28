@@ -225,9 +225,27 @@ class NewProducerController extends GetxController {
       'phone': phone.text,
       if (cni.text.trim().isNotEmpty) 'cni': cni.text.trim(),
     };
+    // Persiste les CNI hors cache temporaire (sinon perdues hors ligne).
+    String? frontPath;
+    String? backPath;
+    if (Get.isRegistered<OutboxService>()) {
+      final outbox = Get.find<OutboxService>();
+      if (cniFront.value != null) {
+        frontPath =
+            await outbox.persistCniPhoto(cniFront.value!, side: 'front');
+      }
+      if (cniBack.value != null) {
+        backPath = await outbox.persistCniPhoto(cniBack.value!, side: 'back');
+      }
+    }
+
     Future<void> enqueueLocal() async {
       if (Get.isRegistered<OutboxService>()) {
-        await Get.find<OutboxService>().enqueueProducerCreate(createPayload);
+        await Get.find<OutboxService>().enqueueProducerCreate({
+          ...createPayload,
+          if (frontPath != null) 'cniFrontPath': frontPath,
+          if (backPath != null) 'cniBackPath': backPath,
+        });
       }
     }
 
@@ -264,12 +282,22 @@ class NewProducerController extends GetxController {
         synced = true;
         serverCode = remote!['code'] as String?;
         serverId = remote!['id'] as String?;
-        for (final path in [cniFront.value, cniBack.value]) {
+        for (final path in [frontPath ?? cniFront.value, backPath ?? cniBack.value]) {
           if (serverId == null || path == null) continue;
           final sent = await runWithRetry(
               () => producersApi.uploadPhoto(serverId!, path),
               title: 'Photo non envoyée');
-          if (!sent) photoFailed = true;
+          if (!sent) {
+            photoFailed = true;
+            // Garde en outbox pour un prochain flush.
+            if (Get.isRegistered<OutboxService>()) {
+              await Get.find<OutboxService>().enqueueGeneric(
+                entity: 'producer_photo',
+                operation: 'upload',
+                payload: {'producerId': serverId, 'path': path},
+              );
+            }
+          }
         }
       }
     } else {

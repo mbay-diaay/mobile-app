@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -24,8 +26,11 @@ class SplashController extends GetxController {
       if (role == AppRole.producer) {
         final api = Get.isRegistered<ApiClient>() ? Get.find<ApiClient>() : null;
         final persisted = session.producerUser.value;
-        final hasSession = (api?.accessToken != null) ||
-            (persisted != null && persisted.id.isNotEmpty);
+        // Exige un jeton réel (API ou local:) — pas seulement le profil persisté.
+        final hasSession = api?.accessToken != null;
+        if (!hasSession && persisted != null) {
+          unawaited(session.clearProducerUser());
+        }
         Get.offAllNamed(
           hasSession ? Routes.producerHome : Routes.authIntent,
           arguments: hasSession
@@ -41,6 +46,15 @@ class SplashController extends GetxController {
         return;
       }
       if (session.activated.value) {
+        // PIN illisible → reconnexion (échec fermé, pas 1234).
+        if (session.pinMissing.value) {
+          Get.offAllNamed(Routes.phone, arguments: {'reconnect': true});
+          return;
+        }
+        if (session.locked) {
+          Get.offAllNamed(Routes.blocked);
+          return;
+        }
         Get.offAllNamed(Routes.unlock);
         return;
       }

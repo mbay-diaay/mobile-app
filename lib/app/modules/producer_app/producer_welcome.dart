@@ -42,7 +42,9 @@ class ProducerWelcomeView extends StatelessWidget {
                   FadeSlideIn(
                     child: TextButton.icon(
                       onPressed: () async {
-                        await Get.find<SessionService>().revoke();
+                        // Retour au choix de rôle sans vider l’outbox tech
+                        // (l’utilisateur n’a peut‑être que basculé par erreur).
+                        await Get.find<SessionService>().clearAppRole();
                         Get.offAllNamed(Routes.roleGate);
                       },
                       style: TextButton.styleFrom(
@@ -84,9 +86,35 @@ class ProducerWelcomeView extends StatelessWidget {
                       'auth.prod.lead'.tr,
                       style: jakarta(14, color: AppColors.muted, height: 1.45),
                     ),
-                    const SizedBox(height: 22),
+                    const SizedBox(height: 18),
                     FadeSlideIn(
                       delay: Motion.stagger(2),
+                      child: Row(children: [
+                        Expanded(
+                          child: _PreviewChip(
+                            icon: Symbols.pentagon_rounded,
+                            label: 'prod.plots'.tr,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _PreviewChip(
+                            icon: Symbols.calendar_month_rounded,
+                            label: 'prod.calendar'.tr,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _PreviewChip(
+                            icon: Symbols.notifications_rounded,
+                            label: 'prod.alerts'.tr,
+                          ),
+                        ),
+                      ]),
+                    ),
+                    const SizedBox(height: 22),
+                    FadeSlideIn(
+                      delay: Motion.stagger(3),
                       child: SwipeCta(
                         label: 'common.swipeCreate'.tr,
                         onConfirm: () async =>
@@ -95,7 +123,7 @@ class ProducerWelcomeView extends StatelessWidget {
                     ),
                     const SizedBox(height: 12),
                     FadeSlideIn(
-                      delay: Motion.stagger(3),
+                      delay: Motion.stagger(4),
                       child: SwipeCta.dark(
                         label: 'common.swipeConnect'.tr,
                         onConfirm: () async =>
@@ -129,4 +157,28 @@ class ProducerWelcomeView extends StatelessWidget {
       ),
     );
   }
+}
+
+class _PreviewChip extends StatelessWidget {
+  const _PreviewChip({required this.icon, required this.label});
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+        decoration: BoxDecoration(
+          color: AppColors.sage,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(children: [
+          Sym(icon, size: 22, color: AppColors.forest, fill: true),
+          const SizedBox(height: 6),
+          Text(label,
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: jakarta(11, weight: FontWeight.w700, color: AppColors.forest)),
+        ]),
+      );
 }

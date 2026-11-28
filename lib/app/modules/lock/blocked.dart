@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -14,10 +15,10 @@ import '../../widgets/buttons.dart';
 import '../../widgets/layout.dart';
 import '../../widgets/ring_progress.dart';
 
-/// 06 · PIN bloqué : compte à rebours de 3 minutes.
+/// 06 · PIN bloqué : compte à rebours basé sur [SessionService.lockedUntilMs].
 class BlockedController extends GetxController {
   static const total = 180;
-  final seconds = (total - 1).obs;
+  final seconds = total.obs;
   Timer? _timer;
 
   String get minutesLabel => '${seconds.value ~/ 60}';
@@ -26,15 +27,21 @@ class BlockedController extends GetxController {
   @override
   void onInit() {
     super.onInit();
+    final session = Get.find<SessionService>();
+    seconds.value = session.lockRemainingSeconds.clamp(1, total);
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (seconds.value <= 0) return retry();
-      seconds.value--;
+      final left = session.lockRemainingSeconds;
+      if (left <= 0) {
+        retry();
+        return;
+      }
+      seconds.value = left;
     });
   }
 
-  void retry() {
+  Future<void> retry() async {
     _timer?.cancel();
-    Get.find<SessionService>().failedAttempts.value = 0;
+    await Get.find<SessionService>().clearPinLock();
     Get.offAllNamed(Routes.unlock);
   }
 
@@ -129,18 +136,19 @@ class BlockedView extends GetView<BlockedController> {
                       )),
                 ),
                 const Spacer(),
-                FadeSlideIn(
-                  delay: const Duration(milliseconds: 450),
-                  child: FlatButton(
-                    label: 'Réessayer (prototype)',
-                    height: 56,
-                    bg: Colors.transparent,
-                    fg: Colors.white,
-                    border: AppColors.white(.3),
-                    size: 15,
-                    onTap: controller.retry,
+                if (kDebugMode)
+                  FadeSlideIn(
+                    delay: const Duration(milliseconds: 450),
+                    child: FlatButton(
+                      label: 'Réessayer (debug)',
+                      height: 56,
+                      bg: Colors.transparent,
+                      fg: Colors.white,
+                      border: AppColors.white(.3),
+                      size: 15,
+                      onTap: controller.retry,
+                    ),
                   ),
-                ),
               ]),
             ),
           ),

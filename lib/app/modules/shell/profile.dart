@@ -124,14 +124,6 @@ class ProfileTab extends StatelessWidget {
                 },
               )),
               row(_Setting(
-                icon: Symbols.cloud_sync_rounded,
-                title: 'Session API (technicien)',
-                sub: Get.find<ApiClient>().accessToken == null
-                    ? 'Non connecté · requis pour créer sur le serveur'
-                    : 'Connecté · créations envoyées au serveur',
-                onTap: () => _connectApi(context),
-              )),
-              row(_Setting(
                 icon: Symbols.smartphone_rounded,
                 title: 'État du téléphone',
                 sub: () {
@@ -145,6 +137,14 @@ class ProfileTab extends StatelessWidget {
             const SizedBox(height: 8),
             _Group(children: [
               if (!kReleaseMode) ...[
+                row(_Setting(
+                  icon: Symbols.cloud_sync_rounded,
+                  title: 'Session API (technicien)',
+                  sub: Get.find<ApiClient>().accessToken == null
+                      ? 'Non connecté · debug seulement'
+                      : 'Connecté · créations envoyées au serveur',
+                  onTap: () => _connectApi(context),
+                )),
                 row(_Setting(
                   icon: Symbols.visibility_rounded,
                   title: 'Aperçu espace producteur',
@@ -168,16 +168,28 @@ class ProfileTab extends StatelessWidget {
                     ),
                   ),
                 )),
+                row(_Setting(
+                  icon: Symbols.mobile_off_rounded,
+                  title: 'Simuler une révocation',
+                  sub: 'Debug',
+                  bg: AppColors.redSoft,
+                  ink: AppColors.redInk,
+                  onTap: () async {
+                    await Get.find<SessionService>().revoke();
+                    Get.offAllNamed(Routes.revoked);
+                  },
+                )),
               ],
               row(_Setting(
                 icon: Symbols.swap_horiz_rounded,
                 title: 'profile.changeRole'.tr,
                 sub: 'profile.changeRoleSub'.tr,
-                onTap: () async {
-                  // Changer de rôle = fin de session : sinon jetons tech/producteur se mélangent.
-                  await Get.find<SessionService>().revoke();
-                  Get.offAllNamed(Routes.roleGate);
-                },
+                onTap: () async => _confirmWipeThen(
+                  title: 'Changer de rôle ?',
+                  message:
+                      'La session et les données non envoyées (hors ligne) seront effacées.',
+                  confirmLabel: 'Changer de rôle',
+                ),
               )),
               row(_Setting(
                 icon: Symbols.lock_rounded,
@@ -189,36 +201,18 @@ class ProfileTab extends StatelessWidget {
                 icon: Symbols.logout_rounded,
                 title: 'Se déconnecter',
                 sub: 'Efface la session et les données de cet appareil',
-                onTap: () async {
-                  final ok = await confirmSheet(
-                    title: 'Se déconnecter ?',
-                    message:
-                        'La session et les données enregistrées sur ce téléphone seront effacées. Vous devrez vous reconnecter.',
-                    confirmLabel: 'Se déconnecter',
-                    icon: Symbols.logout_rounded,
-                    destructive: true,
-                  );
-                  if (!ok) return;
-                  await Get.find<SessionService>().revoke();
-                  Get.offAllNamed(Routes.roleGate);
-                },
-              )),
-              row(_Setting(
-                icon: Symbols.mobile_off_rounded,
-                title: 'Simuler une révocation',
-                sub: 'Prototype',
-                bg: AppColors.redSoft,
-                ink: AppColors.redInk,
                 last: true,
-                onTap: () async {
-                  await Get.find<SessionService>().revoke();
-                  Get.offAllNamed(Routes.revoked);
-                },
+                onTap: () async => _confirmWipeThen(
+                  title: 'Se déconnecter ?',
+                  message:
+                      'La session et les données enregistrées sur ce téléphone seront effacées. Vous devrez vous reconnecter.',
+                  confirmLabel: 'Se déconnecter',
+                ),
               )),
             ]),
             const SizedBox(height: 16),
             Center(
-                child: Text('v0.1.0 · prototype · données fictives',
+                child: Text('v0.1.0 · Mbay Diaay',
                     style: mono(9, color: AppColors.gray))),
           ],
         ),
@@ -227,14 +221,37 @@ class ProfileTab extends StatelessWidget {
   }
 }
 
-/// Connexion API technicien (email + OTP) pour envoyer les créations producteur au serveur.
+Future<void> _confirmWipeThen({
+  required String title,
+  required String message,
+  required String confirmLabel,
+}) async {
+  final session = Get.find<SessionService>();
+  final pending = await session.hasPendingOutbox();
+  final ok = await confirmSheet(
+    title: title,
+    message: pending
+        ? '$message\n\nAttention : des saisies hors ligne ne sont pas encore synchronisées.'
+        : message,
+    confirmLabel: confirmLabel,
+    icon: Symbols.logout_rounded,
+    destructive: true,
+  );
+  if (!ok) return;
+  await session.revoke();
+  Get.offAllNamed(Routes.roleGate);
+}
+
+/// Connexion API technicien (email + OTP) — debug uniquement.
 Future<void> _connectApi(BuildContext context) async {
-  final email = TextEditingController(text: 'fatou.sarr@cradesc.example');
-  final password = TextEditingController(text: 'Demonstration2026');
-  final otp = TextEditingController(text: '000000');
+  if (kReleaseMode) return;
+  final email = TextEditingController();
+  final password = TextEditingController();
+  final otp = TextEditingController();
   final ok = await Get.dialog<bool>(
     AlertDialog(
-      title: Text('Session API', style: jakarta(16, weight: FontWeight.w700)),
+      title: Text('Session API (debug)',
+          style: jakarta(16, weight: FontWeight.w700)),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [

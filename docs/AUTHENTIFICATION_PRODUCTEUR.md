@@ -34,4 +34,4 @@ Splash
 - `lib/app/modules/producer_app/producer_welcome.dart`
 - `lib/app/modules/producer_app/producer_login.dart`
 - `lib/app/modules/producer_app/producer_register.dart`
-- `lib/app/modules/producer_app/producer_home.dart`
+- `lib/app/modules/producer_app/producer_home.dart` — shell 5 onglets (Accueil, Parcelles, Calendrier, Alertes, Profil), catalogue `producer_catalog.dart`, design aligné technicien

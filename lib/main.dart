@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
@@ -41,8 +43,10 @@ Future<void> main() async {
   }
   // Session refusée par l'API : retour au parcours du rôle courant.
   Get.find<ApiClient>().onSessionExpired = () {
-    final r = Get.find<SessionService>().appRole.value;
+    final session = Get.find<SessionService>();
+    final r = session.appRole.value;
     if (r == AppRole.producer) {
+      unawaited(session.clearProducerUser());
       if (Get.currentRoute == Routes.producerLogin ||
           Get.currentRoute == Routes.producerWelcome ||
           Get.currentRoute == Routes.authIntent) {

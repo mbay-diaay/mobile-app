@@ -7,8 +7,8 @@ Références : maquette PDF « Mbay Diaay Mobile » (01–25) · PRD Mobile v0.1
 | — | Splash | `/` | OK |
 | — | Choix de rôle | `/role` | OK (Technicien / Producteur — une seule app) |
 | 01 | Connexion téléphone / code / MDP | `/activation/phone` | OK (stratégie téléphone, pas SMS métier) |
-| P·auth | Welcome / login / register producteur | `/producer-app/*` | UI OK — API `/auth/producer/*` à livrer |
-| P·home | Shell producteur | `/producer-app/home` | Design OK — données placeholders |
+| P·auth | Welcome / login / register producteur | `/producer-app/*` | OK (+ fallback local) |
+| P·home | Shell producteur (5 onglets) | `/producer-app/home` | OK — Accueil / Parcelles / Calendrier / Alertes / Profil |
 | 02 | Code e-mail (test) | `/activation/code` | OK (parcours test seulement) |
 | 03 | Choix PIN + confirmation | `/activation/pin` | OK |
 | 04 | Téléchargement annuaire | `/activation/download` | OK |

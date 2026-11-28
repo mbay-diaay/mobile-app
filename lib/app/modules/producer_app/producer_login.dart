@@ -16,8 +16,11 @@ import '../../widgets/buttons.dart';
 import '../../widgets/layout.dart';
 
 class ProducerLoginController extends GetxController {
-  final phone = TextEditingController(text: ProducerSeed.phoneDisplay);
-  final password = TextEditingController(text: ProducerSeed.password);
+  // Champs vides en release ; seed prérempli seulement en debug.
+  final phone = TextEditingController(
+      text: kDebugMode ? ProducerSeed.phoneDisplay : '');
+  final password = TextEditingController(
+      text: kDebugMode ? ProducerSeed.password : '');
   final phoneFocus = FocusNode();
   final passFocus = FocusNode();
   final hidden = true.obs;
@@ -39,6 +42,7 @@ class ProducerLoginController extends GetxController {
   }
 
   Future<void> enterSeed() async {
+    if (kReleaseMode) return;
     phone.text = ProducerSeed.phoneDisplay;
     password.text = ProducerSeed.password;
     rev.value++;
@@ -54,16 +58,17 @@ class ProducerLoginController extends GetxController {
     busy.value = true;
     error.value = null;
     try {
-      // Seed local : téléphone démo → pas d’API (même si le MDP a bougé un peu).
-      if (ProducerSeed.isSeedPhone(phone.text)) {
+      // Seed local : uniquement en debug (jamais en release / APK terrain).
+      if (kDebugMode && ProducerSeed.isSeedPhone(phone.text)) {
         if (!ProducerSeed.matches(
             phone: phone.text, password: password.text)) {
-          error.value =
-              'Mot de passe seed : ${ProducerSeed.password}';
+          error.value = 'Mot de passe incorrect.';
           shake.value++;
           return;
         }
-        await Get.find<SessionService>().setAppRole(AppRole.producer);
+        final session = Get.find<SessionService>();
+        await session.setAppRole(AppRole.producer);
+        await session.saveProducerUser(ProducerSeed.user);
         Get.offAllNamed(Routes.producerHome, arguments: ProducerSeed.user);
         return;
       }
@@ -75,9 +80,14 @@ class ProducerLoginController extends GetxController {
       if (!api.isLocalSession) {
         try {
           me = await auth.me();
-        } catch (_) {}
+        } on ApiException {
+          await auth.logout();
+          error.value = 'Impossible de vérifier le compte. Réessayez.';
+          shake.value++;
+          return;
+        }
       }
-      if (me.role.isNotEmpty && me.role != AuthUser.producerRole) {
+      if (me.role != AuthUser.producerRole) {
         await auth.logout();
         error.value = 'Ce compte n’est pas un compte producteur.';
         shake.value++;
